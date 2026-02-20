@@ -1,96 +1,101 @@
 // kernel/filesystem.c
-#include <stdint.h>
+#include "filesystem.h"
 #include <string.h>
 
-#define DISK_SIZE 1024 * 1024 // 1MB Virtual Disk
-#define CLUSTER_SIZE 512
-#define ROOT_DIR_SIZE 32
 #define MAX_FILES 16
+#define CLUSTER_SIZE 512
 
-// Simple File Control Block
 typedef struct {
-    char name[11]; // 8.3 Filename format (FILENAME EXT)
+    char name[11];      // 8.3 format: "FILENAME  EXT"
     uint8_t data[CLUSTER_SIZE];
-    uint16_t cluster_start;
     uint16_t size;
     uint8_t is_used;
-} file_t;
+} file_entry_t;
 
-// The "Disk" Image in Memory
-static uint8_t disk_image[DISK_SIZE];
-static file_t open_files[MAX_FILES];
+static file_entry_t file_table[MAX_FILES];
 
-// Initialize the virtual disk with empty structures
-void init_filesystem() {
-    memset(disk_image, 0, DISK_SIZE);
-    for(int i = 0; i < MAX_FILES; i++) {
-        open_files[i].is_used = 0;
-        memset(open_files[i].name, ' ', 11);
+void init_filesystem(void) {
+    for (int i = 0; i < MAX_FILES; i++) {
+        memset(file_table[i].name, ' ', 11);
+        file_table[i].is_used = 0;
+        file_table[i].size = 0;
+        memset(file_table[i].data, 0, CLUSTER_SIZE);
     }
 }
 
-// Find an empty slot in our "open file table"
-int fs_open(char *filename, char mode) {
-    int slot = -1;
-    for(int i = 0; i < MAX_FILES; i++) {
-        if(!open_files[i].is_used) {
-            slot = i;
-            break;
+static file_entry_t* find_file(const char* name) {
+    for (int i = 0; i < MAX_FILES; i++) {
+        if (file_table[i].is_used && 
+            strncmp(file_table[i].name, name, 11) == 0) {
+            return &file_table[i];
         }
     }
-    if(slot == -1) return -1; // No slots left
-
-    // Logic to find file on "disk" or create new one
-    // For simplicity, we are simulating a fresh disk every boot
-    // In a real implementation, you would scan the Root Directory sector here
-    
-    strncpy(open_files[slot].name, filename, 11);
-    open_files[slot].is_used = 1;
-    open_files[slot].size = 0;
-    
-    // If reading, we'd load from disk_image, but here we just clear it
-    if(mode == 'w') {
-        memset(open_files[slot].data, 0, CLUSTER_SIZE);
-    }
-
-    return slot;
+    return NULL;
 }
 
-int fs_write(int handle, void *buffer, int size) {
-    if(handle < 0 || handle >= MAX_FILES) return -1;
-    if(!open_files[handle].is_used) return -1;
-
-    int bytes_written = 0;
-    char *src = (char*)buffer;
+file_t fs_open(const char *filename, char mode) {
+    // 1. Try to find existing file
+    file_entry_t* file = find_file(filename);
     
-    // Simple write to the cluster
-    for(int i = 0; i < size; i++) {
-        if(open_files[handle].size < CLUSTER_SIZE) {
-            open_files[handle].data[open_files[handle].size] = src[i];
-            open_files[handle].size++;
-            bytes_written++;
+    // 2. If writing, create a new file (or overwrite if exists)
+    if (mode == 'w') {
+        if (!file) {
+            // Find free slot
+            for (int i = 0; i < MAX_FILES; i++) {
+                if (!file_table[i].is_used) {
+                    file = &file_table[i];
+                    break;
+                }
+            }
+            if (!file) return -1; // No space
+
+            // Initialize new file
+            strncpy((char*)file->name, filename, 11);
+            file->is_used = 1;
+            file->size = 0;
+        }
+    } else if (mode == 'r') {
+        if (!file) return -1; // File not found
+    } else {
+        return -1; // Invalid mode
+    }
+
+    // For simplicity, return file index + 1 (to avoid 0 = error)
+    return (file - file_table) + 1;
+}
+
+int fs_write(file_t handle, const void *buffer, int size) {
+    if (handle <= 0 || handle > MAX_FILES) return -1;
+    file_entry_t *file = &file_table[handle - 1];
+    
+    if (!file->is_used) return -1;
+
+    const char *src = (const char *)buffer;
+    int written = 0;
+    for (int i = 0; i < size; i++) {
+        if (file->size < CLUSTER_SIZE) {
+            file->data[file->size++] = src[i];
+            written++;
         }
     }
-    return bytes_written;
+    return written;
 }
 
-int fs_read(int handle, void *buffer, int max_size) {
-    if(handle < 0 || handle >= MAX_FILES) return -1;
-    if(!open_files[handle].is_used) return -1;
-
-    int bytes_read = 0;
-    char *dst = (char*)buffer;
+int fs_read(file_t handle, void *buffer, int max_size) {
+    if (handle <= 0 || handle > MAX_FILES) return -1;
+    file_entry_t *file = &file_table[handle - 1];
     
-    // Copy from cluster to buffer
-    for(int i = 0; i < open_files[handle].size && i < max_size; i++) {
-        dst[i] = open_files[handle].data[i];
-        bytes_read++;
+    if (!file->is_used || file->size == 0) return 0;
+
+    char *dst = (char *)buffer;
+    int read_bytes = 0;
+    for (int i = 0; i < file->size && read_bytes < max_size; i++) {
+        dst[read_bytes++] = file->data[i];
     }
-    return bytes_read;
+    return read_bytes;
 }
 
-void fs_close(int handle) {
-    if(handle >= 0 && handle < MAX_FILES) {
-        open_files[handle].is_used = 0;
-    }
+void fs_close(file_t handle) {
+    // In this simple model, closing does nothing.
+    // In a real OS: flush buffers, update directory, etc.
 }
