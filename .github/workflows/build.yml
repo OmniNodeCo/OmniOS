@@ -1,0 +1,29 @@
+name: Build Operating System
+
+on: [push, pull_request]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Install Build Tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y nasm gcc qemu-system-x86
+
+    - name: Assemble Bootloader
+      run: nasm -f elf32 boot/bootloader.asm -o boot/bootloader.o
+
+    - name: Compile Kernel
+      run: |
+        gcc -m32 -c kernel/main.c -o kernel/main.o -ffreestanding -Ikernel
+        gcc -m32 -c kernel/video.c -o kernel/video.o -ffreestanding -Ikernel
+        gcc -m32 -c kernel/filesystem.c -o kernel/filesystem.o -ffreestanding -Ikernel
+        ld -m elf_i386 -T tools/linker.ld -o build/kernel.bin boot/bootloader.o kernel/*.o
+
+    - name: Run OS in QEMU
+      run: qemu-system-i386 -kernel build/kernel.bin -nographic -serial stdio
