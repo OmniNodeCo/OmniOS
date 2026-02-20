@@ -1,0 +1,133 @@
+# os-config.yml
+# Configuration for "Project Nova" - A Learning Operating System
+version: "1.0.0"
+description: >
+  A monolithic, hobbyist operating system kernel written in C and Assembly.
+  Features a custom FAT12 file system implementation and simple VGA text output.
+
+# Hardware targets
+target_architecture:
+  - i686 # 32-bit x86
+  # - x86_64 # Future expansion for 64-bit
+
+# Project Structure Definition
+structure:
+  boot:
+    path: boot/
+    files:
+      - name: bootloader.asm
+        purpose: "BIOS-compatible bootloader switching to protected mode"
+        compiler: "nasm"
+        flags: "-f elf32"
+  
+  kernel:
+    path: kernel/
+    files:
+      - name: main.c
+        purpose: "Kernel entry point (C)"
+      - name: video.c
+        purpose: "VGA text buffer rendering driver"
+      - name: memory.c
+        purpose: "Memory management unit (MMU) setup"
+      - name: filesystem.c
+        purpose: "Custom FAT12 file system implementation"
+      - name: interrupts.c
+        purpose: "IDT and PIC handling (Placeholder)"
+
+  tools:
+    path: tools/
+    files:
+      - name: linker.ld
+        purpose: "GNU Linker script for memory layout"
+
+# Build Pipeline Configuration
+build:
+  steps:
+    - name: "Assemble Bootloader"
+      command: "nasm -f elf32 boot/bootloader.asm -o boot/bootloader.o"
+    
+    - name: "Compile Kernel Modules"
+      command: |
+        gcc -m32 -c kernel/main.c -o kernel/main.o -ffreestanding -Ikernel
+        gcc -m32 -c kernel/video.c -o kernel/video.o -ffreestanding -Ikernel
+        gcc -m32 -c kernel/filesystem.c -o kernel/filesystem.o -ffreestanding -Ikernel
+        gcc -m32 -c kernel/memory.c -o kernel/memory.o -ffreestanding -Ikernel
+        gcc -m32 -c kernel/interrupts.c -o kernel/interrupts.o -ffreestanding -Ikernel
+
+    - name: "Link Kernel"
+      command: "ld -m elf_i386 -T tools/linker.ld -o build/kernel.bin boot/bootloader.o kernel/*.o"
+
+    - name: "Create Disk Image"
+      command: "dd if=/dev/zero of=build/os-disk.img bs=512 count=2880 && mkfs.msdos build/os-disk.img"
+
+  artifacts:
+    - path: build/kernel.bin
+      type: "elf_executable"
+      description: "The compiled kernel ready for QEMU execution"
+    
+    - path: build/os-disk.img
+      type: "floppy_image"
+      description: "1.44MB disk image containing the OS"
+
+# Runtime Environment
+runtime:
+  emulator: "qemu-system-i386"
+  flags:
+    - "-enable-kvm" # Use hardware acceleration if available
+    - "-m 128M"     # Allocate 128MB RAM
+    - "-cdrom build/os-disk.img" # Boot from floppy image
+  commands:
+    run_qemu: "qemu-system-i386 -enable-kvm -m 128M -kernel build/kernel.bin"
+
+# Dependencies
+dependencies:
+  build:
+    - name: "nasm"
+      version_constraint: ">= 2.15"
+      purpose: "Assembly compiler"
+    - name: "gcc"
+      version_constraint: ">= 7.0"
+      purpose: "C Compiler (mingw-w64 or cross-compiler recommended)"
+    - name: "binutils"
+      version_constraint: ">= 2.30"
+      purpose: "Linker (ld)"
+    - name: "qemu"
+      version_constraint: ">= 5.0"
+      purpose: "Virtual Machine for testing"
+  runtime:
+    - name: "kvm"
+      optional: true
+      purpose: "Hardware acceleration for QEMU"
+
+# Testing Configuration
+testing:
+  unit_tests:
+    enabled: false
+    command: "make test" # Placeholder
+  
+  integration_tests:
+    - name: "File System Integrity"
+      description: "Create a file, verify content matches"
+      script: |
+        # Logic would go here to boot OS and check files
+    
+# CI/CD Integration (GitHub Actions Example)
+ci:
+  github_actions:
+    trigger:
+      - push
+      - pull_request
+    runner: "ubuntu-latest"
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Dependencies
+        run: sudo apt-get install nasm gcc qemu-system-x86
+      - name: Build OS
+        run: ./build.sh
+      - name: Run Tests
+        run: qemu-system-i386 -kernel build/kernel.bin -nographic -serial stdio -append "test_mode"
+
+# Notes
+notes: >
+  This configuration assumes a Linux or WSL environment for building.
+  For Windows hosts, use WSL2 or install MinGW-w64 toolchain manually.
