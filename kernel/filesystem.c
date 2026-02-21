@@ -1,16 +1,28 @@
 /* kernel/filesystem.c */
-#include "filesystem.h"  // ← CRITICAL: Defines file_t
-#include "types.h"       // For NULL, size_t, uint8_t, etc.
+#include "filesystem.h"   // For file_t, declarations
+#include "types.h"        // For NULL, size_t, strncpy, strncmp, uint8_t, etc.
 
-// Use GCC builtins (safe with -nostdinc)
-#define memset __builtin_memset
-#define memcpy __builtin_memcpy
-
+// ============================================================================
+// PRIVATE IMPLEMENTATION DETAILS (not in header - encapsulated)
+// ============================================================================
 #define MAX_FILES 16
 #define CLUSTER_SIZE 512
 
-// file_t is already defined here as 'typedef int file_t;'
-// so we don't redefine it!
+// Define file_entry_t here — it's internal to this module
+typedef struct {
+    char name[11];      // "FILENAME.EXT" padded to 11 bytes
+    uint8_t data[CLUSTER_SIZE];
+    uint16_t size;
+    uint8_t is_used;
+} file_entry_t;
+
+// Use GCC builtins
+#define memset __builtin_memset
+#define memcpy __builtin_memcpy
+
+// ============================================================================
+// PUBLIC FUNCTIONS (implementations)
+// ============================================================================
 
 static file_entry_t file_table[MAX_FILES];
 
@@ -89,5 +101,5 @@ int fs_read(file_t handle, void *buffer, int max_size) {
 }
 
 void fs_close(file_t handle) {
-    // No-op
+    // No-op in this simple model
 }
