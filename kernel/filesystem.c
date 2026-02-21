@@ -1,5 +1,6 @@
 /* kernel/filesystem.c */
-#include "types.h"
+#include "filesystem.h"  // ← CRITICAL: Defines file_t
+#include "types.h"       // For NULL, size_t, uint8_t, etc.
 
 // Use GCC builtins (safe with -nostdinc)
 #define memset __builtin_memset
@@ -8,12 +9,8 @@
 #define MAX_FILES 16
 #define CLUSTER_SIZE 512
 
-typedef struct {
-    char name[11];
-    uint8_t data[CLUSTER_SIZE];
-    uint16_t size;
-    uint8_t is_used;
-} file_entry_t;
+// file_t is already defined here as 'typedef int file_t;'
+// so we don't redefine it!
 
 static file_entry_t file_table[MAX_FILES];
 
@@ -49,7 +46,7 @@ file_t fs_open(const char *filename, char mode) {
             }
             if (!file) return -1;
 
-            strncpy((char*)file->name, filename, 11);  // ✅ Now works!
+            strncpy((char*)file->name, filename, 11);
             file->is_used = 1;
             file->size = 0;
         }
