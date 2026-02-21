@@ -3,16 +3,19 @@ ENTRY(start)
 OUTPUT_FORMAT(elf32-i386)
 SECTIONS {
     . = 0x100000;
-    
-    .text : {
+
+    .multiboot : {
         *(.multiboot)
+    }
+
+    .text : {
         *(.text)
     }
-    
+
     .rodata : {
         *(.rodata)
     }
-    
+
     .data : {
         *(.data)
         *(.bss)

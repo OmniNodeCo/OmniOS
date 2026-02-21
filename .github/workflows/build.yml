@@ -1,25 +1,35 @@
 # .github/workflows/build.yml
-name: OS Build & Test
+name: OS Build & ISO
 
 on: [push, pull_request]
 
 jobs:
-  build:
+  build-and-package:
     runs-on: ubuntu-latest
 
     steps:
+      # 1. Checkout your code
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # 2. Install build tools
       - name: Install Tools
-        run: sudo apt-get update && sudo apt-get install -y nasm gcc qemu-system-x86
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            nasm gcc build-essential \
+            qemu-system-x86 \
+            xorriso mtools bc
 
-      - name: Create build directory
+      # 3. Create build directory
+      - name: Prepare
         run: mkdir -p build
 
+      # 4. Assemble bootloader
       - name: Assemble Bootloader
         run: nasm -f elf32 boot/bootloader.asm -o boot/bootloader.o
 
+      # 5. Compile kernel
       - name: Compile Kernel
         run: |
           gcc -m32 -c kernel/main.c -o kernel/main.o \
@@ -32,11 +42,48 @@ jobs:
             -ffreestanding -nostdinc -fno-stack-protector \
             -Ikernel -I.
 
+      # 6. Link kernel
       - name: Link Kernel
         run: |
           ld -m elf_i386 -T tools/linker.ld -o build/kernel.bin \
             boot/bootloader.o kernel/*.o
 
-      - name: Run in QEMU
-        run: timeout 5s qemu-system-i386 \
-          -nographic -serial stdio -kernel build/kernel.bin || true
+      # 7. Create ISO directory structure (syslinux-based)
+      - name: Create ISO Structure
+        run: |
+          mkdir -p build/iso/boot/grub
+          cp build/kernel.bin build/iso/boot/kernel.bin
+          echo 'set timeout=0
+          set default=0
+
+          menuentry "MyOS" {
+              multiboot /boot/kernel.bin
+              boot
+          }' > build/iso/boot/grub/grub.cfg
+
+          # Create a minimal grub.cfg fallback (in case above fails)
+          echo 'set timeout=0
+          set default=0
+
+          menuentry "MyOS" {
+              linux /boot/kernel.bin
+          }' > build/iso/boot/grub/grub.cfg.fallback
+
+      # 8. Create ISO with GRUB (using grub-mkrescue or manual method)
+      - name: Build ISO
+        run: |
+          # Create iso image with GRUB (more reliable than xorriso for simple cases)
+          grub-mkrescue -o build/os.iso build/iso --compress=xz || \
+            # Fallback: manual ISO creation with mkisofs (simpler, no GRUB)
+            mkisofs -R -b boot/grub/stage2_eltorito -no-emul-boot \
+              -boot-info-table -o build/os.iso build/iso
+
+      # 9. Upload ISO as artifact (you can download it!)
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: os-build
+          path: |
+            build/kernel.bin
+            build/os.iso
+          retention-days: 7
