@@ -1,15 +1,9 @@
 /* kernel/filesystem.c */
-// ✅ NO #include <stdio.h> or <string.h>
-// Uses kernel/types.h + GCC builtins
-
 #include "types.h"
-#include "filesystem.h"
 
 // Use GCC builtins (safe with -nostdinc)
 #define memset __builtin_memset
 #define memcpy __builtin_memcpy
-#define strncpy __builtin_strncpy
-#define strncmp __builtin_strncmp
 
 #define MAX_FILES 16
 #define CLUSTER_SIZE 512
@@ -39,7 +33,7 @@ static file_entry_t* find_file(const char* name) {
             return &file_table[i];
         }
     }
-    return NULL;  // ✅ Works (defined in types.h)
+    return NULL;
 }
 
 file_t fs_open(const char *filename, char mode) {
@@ -55,7 +49,7 @@ file_t fs_open(const char *filename, char mode) {
             }
             if (!file) return -1;
 
-            strncpy((char*)file->name, filename, 11);
+            strncpy((char*)file->name, filename, 11);  // ✅ Now works!
             file->is_used = 1;
             file->size = 0;
         }

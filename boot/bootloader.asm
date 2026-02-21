@@ -19,3 +19,6 @@ start:
 hang:
     hlt
     jmp hang
+
+; ✅ Add this to avoid executable stack warnings
+section .note.GNU-stack noalloc noexec nowrite progbits
