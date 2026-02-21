@@ -11,61 +11,42 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Build Tools
+      - name: Install Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            nasm \
-            gcc \
-            build-essential \
-            qemu-system-x86 \
-            syslinux-common \
-            genisoimage \
-            mtools \
-            mbr
+          sudo apt-get install -y nasm gcc build-essential qemu-system-x86 syslinux-common genisoimage mtools mbr
 
-      - name: Prepare Directory Structure
+      - name: Prepare ISO Structure
         run: mkdir -p build/iso/isolinux
 
-      # Step 1: Assemble Bootloader (32-bit ELF)
       - name: Assemble Bootloader
         run: nasm -f elf32 boot/bootloader.asm -o boot/bootloader.o
 
-      # Step 2: Compile Kernel (C modules)
-      - name: Compile Kernel (C)
+      - name: Compile Kernel
         run: |
           gcc -m32 -c kernel/main.c -o kernel/main.o \
-            -ffreestanding -nostdinc -fno-stack-protector \
-            -Ikernel -I.
+            -ffreestanding -nostdinc -fno-stack-protector -Ikernel -I.
           gcc -m32 -c kernel/video.c -o kernel/video.o \
-            -ffreestanding -nostdinc -fno-stack-protector \
-            -Ikernel -I.
+            -ffreestanding -nostdinc -fno-stack-protector -Ikernel -I.
           gcc -m32 -c kernel/filesystem.c -o kernel/filesystem.o \
-            -ffreestanding -nostdinc -fno-stack-protector \
-            -Ikernel -I.
+            -ffreestanding -nostdinc -fno-stack-protector -Ikernel -I.
 
-      # Step 3: Link Kernel
       - name: Link Kernel
         run: |
           ld -m elf_i386 -T tools/linker.ld -o build/kernel.bin \
             boot/bootloader.o kernel/*.o
 
-      # Step 4: Copy kernel to ISO structure
-      - name: Copy Kernel to ISO
+      - name: Copy Kernel
         run: cp build/kernel.bin build/iso/kernel.bin
 
-      # Step 5: Create ISOLINUX boot config
-      - name: Create ISOLINUX Config
+      # ✅ UPDATED: Use printf with escaped newlines (no heredocs)
+      - name: Create ISOLINUX Config (Safe)
         run: |
-          echo "DEFAULT boot/kernel.bin
-  PROMPT 0
-  TIMEOUT 0" > build/iso/isolinux.cfg
+          printf 'DEFAULT boot/kernel.bin\nPROMPT 0\nTIMEOUT 0\n' > build/iso/isolinux.cfg
 
-      # Copy ISOLINUX boot sector (from syslinux-common package)
-      - name: Copy ISOLINUX Boot Sector
+      - name: Copy Boot Sector
         run: cp /usr/lib/ISOLINUX/isolinux.bin build/iso/
 
-      # Step 6: Build Bootable ISO
       - name: Build ISO
         run: |
           genisoimage -input-charset iso8859-1 \
@@ -78,20 +59,9 @@ jobs:
             -boot-info-table \
             build/iso
 
-          # Verify ISO
-          echo "Generated ISO info:"
-          file build/os.iso
-          ls -lh build/os.iso
+      - name: Test ISO
+        run: timeout 5s qemu-system-i386 -cdrom build/os.iso -nographic -serial stdio || true
 
-      # Step 7: Test ISO in QEMU (optional, for CI verification)
-      - name: Test ISO in QEMU
-        run: |
-          timeout 5s qemu-system-i386 \
-            -cdrom build/os.iso \
-            -nographic \
-            -serial stdio || true
-
-      # Step 8: Upload artifact (you'll download this!)
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
