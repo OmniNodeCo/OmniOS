@@ -1,4 +1,4 @@
-# .github/workflows/build.yml (FIXED)
+# .github/workflows/build.yml (ULTRA-RELIABLE)
 name: OS Build & ISO
 
 on: [push, pull_request]
@@ -14,15 +14,7 @@ jobs:
       - name: Install Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
-            nasm \
-            gcc \
-            build-essential \
-            qemu-system-x86 \
-            syslinux \
-            syslinux-utils \
-            genisoimage \
-            mtools
+          sudo apt-get install -y nasm gcc build-essential qemu-system-x86 genisoimage
 
       - name: Prepare ISO Structure
         run: mkdir -p build/iso/isolinux
@@ -47,44 +39,17 @@ jobs:
       - name: Copy Kernel
         run: cp build/kernel.bin build/iso/kernel.bin
 
-      # ✅ CRITICAL FIX: Use multiple fallbacks to find isolinux.bin
-      - name: Locate or Download ISOLINUX Boot Sector
-        id: find_isolinux
+      # ✅ FIXED: Download isolinux.bin directly from GitHub mirror (no zip extract)
+      - name: Download ISOLINUX Boot Sector
         run: |
-          # Method 1: Check common paths
-          ISOLINUX_PATH=""
-          
-          for path in \
-            "/usr/lib/syslinux/modules/bios/isolinux.bin" \
-            "/usr/lib/ISOLINUX/isolinux.bin" \
-            "/usr/share/syslinux/isolinux.bin"; do
-            if [ -f "$path" ]; then
-              ISOLINUX_PATH="$path"
-              break
-            fi
-          done
-
-          # Method 2: Download from syslinux repository if missing
-          if [ -z "$ISOLINUX_PATH" ]; then
-            echo "ISOLINUX not found, downloading..."
-            wget -q https://www.kernel.org/pub/linux/utils/boot/syslinux/syslinux-6.03.zip -O /tmp/syslinux.zip
-            unzip -p /tmp/syslinux.zip syslinux-6.03/bios/core/isolinux.bin > build/iso/isolinux.bin
-            ISOLINUX_PATH="build/iso/isolinux.bin"
-          else
-            cp "$ISOLINUX_PATH" build/iso/
-            ISOLINUX_PATH="build/iso/isolinux.bin"
-          fi
-
-          echo "isolinux_path=$ISOLINUX_PATH" >> $GITHUB_OUTPUT
+          mkdir -p build/iso/isolinux
+          # Get isolinux.bin from a known-working repo
+          wget -O build/iso/isolinux.bin \
+            https://raw.githubusercontent.com/syslinux/syslinux/6.03/bios/core/isolinux.bin
 
       - name: Create ISOLINUX Config
         run: |
           printf 'DEFAULT boot/kernel.bin\nPROMPT 0\nTIMEOUT 0\n' > build/iso/isolinux.cfg
-
-      # ✅ Use downloaded/copied boot sector
-      - name: Copy Boot Sector
-        run: |
-          cp "${{ steps.find_isolinux.outputs.isolinux_path }}" build/iso/isolinux.bin
 
       - name: Build ISO
         run: |
