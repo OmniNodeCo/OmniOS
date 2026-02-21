@@ -8,29 +8,31 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1. Checkout your code
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 2. Install build tools
-      - name: Install Tools
+      - name: Install Build Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            nasm gcc build-essential \
+            nasm \
+            gcc \
+            build-essential \
             qemu-system-x86 \
-            xorriso mtools bc
+            syslinux-common \
+            genisoimage \
+            mtools \
+            mbr
 
-      # 3. Create build directory
-      - name: Prepare
-        run: mkdir -p build
+      - name: Prepare Directory Structure
+        run: mkdir -p build/iso/isolinux
 
-      # 4. Assemble bootloader
+      # Step 1: Assemble Bootloader (32-bit ELF)
       - name: Assemble Bootloader
         run: nasm -f elf32 boot/bootloader.asm -o boot/bootloader.o
 
-      # 5. Compile kernel
-      - name: Compile Kernel
+      # Step 2: Compile Kernel (C modules)
+      - name: Compile Kernel (C)
         run: |
           gcc -m32 -c kernel/main.c -o kernel/main.o \
             -ffreestanding -nostdinc -fno-stack-protector \
@@ -42,43 +44,54 @@ jobs:
             -ffreestanding -nostdinc -fno-stack-protector \
             -Ikernel -I.
 
-      # 6. Link kernel
+      # Step 3: Link Kernel
       - name: Link Kernel
         run: |
           ld -m elf_i386 -T tools/linker.ld -o build/kernel.bin \
             boot/bootloader.o kernel/*.o
 
-      # 7. Create ISO directory structure (syslinux-based)
-      - name: Create ISO Structure
+      # Step 4: Copy kernel to ISO structure
+      - name: Copy Kernel to ISO
+        run: cp build/kernel.bin build/iso/kernel.bin
+
+      # Step 5: Create ISOLINUX boot config
+      - name: Create ISOLINUX Config
         run: |
-          mkdir -p build/iso/boot/grub
-          cp build/kernel.bin build/iso/boot/kernel.bin
-          echo 'set timeout=0
-          set default=0
+          echo "DEFAULT boot/kernel.bin
+  PROMPT 0
+  TIMEOUT 0" > build/iso/isolinux.cfg
 
-          menuentry "MyOS" {
-              multiboot /boot/kernel.bin
-              boot
-          }' > build/iso/boot/grub/grub.cfg
+      # Copy ISOLINUX boot sector (from syslinux-common package)
+      - name: Copy ISOLINUX Boot Sector
+        run: cp /usr/lib/ISOLINUX/isolinux.bin build/iso/
 
-          # Create a minimal grub.cfg fallback (in case above fails)
-          echo 'set timeout=0
-          set default=0
-
-          menuentry "MyOS" {
-              linux /boot/kernel.bin
-          }' > build/iso/boot/grub/grub.cfg.fallback
-
-      # 8. Create ISO with GRUB (using grub-mkrescue or manual method)
+      # Step 6: Build Bootable ISO
       - name: Build ISO
         run: |
-          # Create iso image with GRUB (more reliable than xorriso for simple cases)
-          grub-mkrescue -o build/os.iso build/iso --compress=xz || \
-            # Fallback: manual ISO creation with mkisofs (simpler, no GRUB)
-            mkisofs -R -b boot/grub/stage2_eltorito -no-emul-boot \
-              -boot-info-table -o build/os.iso build/iso
+          genisoimage -input-charset iso8859-1 \
+            -V "MyOS" \
+            -o build/os.iso \
+            -b isolinux/isolinux.bin \
+            -c isolinux/boot.cat \
+            -no-emul-boot \
+            -boot-load-size 4 \
+            -boot-info-table \
+            build/iso
 
-      # 9. Upload ISO as artifact (you can download it!)
+          # Verify ISO
+          echo "Generated ISO info:"
+          file build/os.iso
+          ls -lh build/os.iso
+
+      # Step 7: Test ISO in QEMU (optional, for CI verification)
+      - name: Test ISO in QEMU
+        run: |
+          timeout 5s qemu-system-i386 \
+            -cdrom build/os.iso \
+            -nographic \
+            -serial stdio || true
+
+      # Step 8: Upload artifact (you'll download this!)
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
