@@ -16,11 +16,18 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y nasm gcc build-essential qemu-system-x86 mtools
 
+      # ✅ Step 1: Create build directory early
+      - name: Prepare Build Directory
+        run: mkdir -p build
+
       - name: Assemble Bootloader
         run: nasm -f elf32 boot/bootloader.asm -o boot/bootloader.o
 
       - name: Compile Kernel
         run: |
+          # Double-check build dir exists (safe)
+          mkdir -p build
+
           gcc -m32 -c kernel/main.c -o kernel/main.o \
             -ffreestanding -nostdinc -fno-stack-protector -Ikernel -I.
           gcc -m32 -c kernel/video.c -o kernel/video.o \
@@ -28,28 +35,22 @@ jobs:
           gcc -m32 -c kernel/filesystem.c -o kernel/filesystem.o \
             -ffreestanding -nostdinc -fno-stack-protector -Ikernel -I.
 
+      # ✅ Step 2: Link to build/kernel.bin (dir now exists)
       - name: Link Kernel
         run: |
+          mkdir -p build
           ld -m elf_i386 -T tools/linker.ld -o build/kernel.bin \
             boot/bootloader.o kernel/*.o
 
-      # ✅ ULTRA-RELIABLE: Create bootable 1.44MB floppy disk image
+      # ✅ Step 3: Create bootable floppy
       - name: Create Bootable Floppy
         run: |
-          # 1. Create 1.44MB zeroed image
+          mkdir -p build  # Ensure build/ exists
           dd if=/dev/zero of=build/os.img bs=1024 count=1440 status=none
-
-          # 2. Format as FAT12 (floppy standard)
           mkfs.msdos build/os.img
-
-          # 3. Write kernel to first cluster (sector 2)
-          # (First 2KB is reserved for MBR/FAT table)
           dd if=build/kernel.bin of=build/os.img bs=1024 seek=2 conv=notrunc status=none
 
-          # 4. Add boot signature (optional, but helps some loaders)
-          printf '\x55\xAA' | dd of=build/os.img bs=1 count=2 seek=510 conv=notrunc status=none
-
-      # ✅ Test in QEMU
+      # ✅ Step 4: Test in QEMU
       - name: Test Floppy Image
         run: |
           timeout 5s qemu-system-i386 \
