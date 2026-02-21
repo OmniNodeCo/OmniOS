@@ -1,4 +1,5 @@
 // kernel/filesystem.c
+#include <stddef.h>
 #include "filesystem.h"
 // ❌ DO NOT: #include <string.h>  ← THIS CAUSES THE ERROR!
 
