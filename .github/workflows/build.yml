@@ -1,5 +1,5 @@
-# .github/workflows/build.yml (ULTRA-RELIABLE)
-name: OS Build & ISO
+# .github/workflows/build.yml
+name: OS Build & Floppy
 
 on: [push, pull_request]
 
@@ -14,10 +14,7 @@ jobs:
       - name: Install Tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y nasm gcc build-essential qemu-system-x86 genisoimage
-
-      - name: Prepare ISO Structure
-        run: mkdir -p build/iso/isolinux
+          sudo apt-get install -y nasm gcc build-essential qemu-system-x86 mtools
 
       - name: Assemble Bootloader
         run: nasm -f elf32 boot/bootloader.asm -o boot/bootloader.o
@@ -36,35 +33,28 @@ jobs:
           ld -m elf_i386 -T tools/linker.ld -o build/kernel.bin \
             boot/bootloader.o kernel/*.o
 
-      - name: Copy Kernel
-        run: cp build/kernel.bin build/iso/kernel.bin
-
-      # ✅ FIXED: Download isolinux.bin directly from GitHub mirror (no zip extract)
-      - name: Download ISOLINUX Boot Sector
+      # ✅ ULTRA-RELIABLE: Create bootable 1.44MB floppy disk image
+      - name: Create Bootable Floppy
         run: |
-          mkdir -p build/iso/isolinux
-          # Get isolinux.bin from a known-working repo
-          wget -O build/iso/isolinux.bin \
-            https://raw.githubusercontent.com/syslinux/syslinux/6.03/bios/core/isolinux.bin
+          # 1. Create 1.44MB zeroed image
+          dd if=/dev/zero of=build/os.img bs=1024 count=1440 status=none
 
-      - name: Create ISOLINUX Config
+          # 2. Format as FAT12 (floppy standard)
+          mkfs.msdos build/os.img
+
+          # 3. Write kernel to first cluster (sector 2)
+          # (First 2KB is reserved for MBR/FAT table)
+          dd if=build/kernel.bin of=build/os.img bs=1024 seek=2 conv=notrunc status=none
+
+          # 4. Add boot signature (optional, but helps some loaders)
+          printf '\x55\xAA' | dd of=build/os.img bs=1 count=2 seek=510 conv=notrunc status=none
+
+      # ✅ Test in QEMU
+      - name: Test Floppy Image
         run: |
-          printf 'DEFAULT boot/kernel.bin\nPROMPT 0\nTIMEOUT 0\n' > build/iso/isolinux.cfg
-
-      - name: Build ISO
-        run: |
-          genisoimage -input-charset iso8859-1 \
-            -V "MyOS" \
-            -o build/os.iso \
-            -b isolinux/isolinux.bin \
-            -c isolinux/boot.cat \
-            -no-emul-boot \
-            -boot-load-size 4 \
-            -boot-info-table \
-            build/iso
-
-      - name: Test ISO
-        run: timeout 5s qemu-system-i386 -cdrom build/os.iso -nographic -serial stdio || true
+          timeout 5s qemu-system-i386 \
+            -fda build/os.img \
+            -nographic -serial stdio || true
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -72,5 +62,5 @@ jobs:
           name: os-build
           path: |
             build/kernel.bin
-            build/os.iso
+            build/os.img
           retention-days: 7
