@@ -2,10 +2,9 @@
 #ifndef FILESYSTEM_H
 #define FILESYSTEM_H
 
-#include <stddef.h>  // Provides NULL, size_t
-#include <stdint.h>  // Provides uint8_t, int32_t, etc.
+#include "types.h"   // ← Use our own types.h
 
-typedef int file_t;   // File handle type
+typedef int file_t;
 
 void init_filesystem(void);
 file_t fs_open(const char *filename, char mode);

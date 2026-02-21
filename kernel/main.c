@@ -1,6 +1,8 @@
 /* kernel/main.c */
-#include <stddef.h>   // For NULL
-#include <stdint.h>   // For uint8_t, etc.
+// ✅ NO #include <stdio.h>, <stdlib.h>, <stddef.h>
+// Include ONLY our own types and headers
+
+#include "types.h"
 #include "video.h"
 #include "filesystem.h"
 #include "memory.h"
@@ -9,12 +11,11 @@ void kernel_main(void) {
     clear_screen();
     print_str("Initializing Kernel... OK\n");
 
-    // Initialize virtual filesystem
     init_filesystem();
 
     print_str("Testing file I/O...\n");
 
-    // Write to file
+    // Write file
     file_t f = fs_open("HELLO.TXT", 'w');
     if (f >= 0) {
         const char *msg = "Hello from my custom OS!";
@@ -30,7 +31,7 @@ void kernel_main(void) {
         print_str("Failed to open file for write.\n");
     }
 
-    // Read from file
+    // Read file
     f = fs_open("HELLO.TXT", 'r');
     if (f >= 0) {
         char buffer[100];

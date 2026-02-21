@@ -2,7 +2,7 @@
 #ifndef VIDEO_H
 #define VIDEO_H
 
-#include <stdint.h>
+#include "types.h"   // ← Use our own types.h
 
 void clear_screen(void);
 void print_char(char c);

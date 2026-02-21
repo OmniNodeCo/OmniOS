@@ -1,8 +1,11 @@
 /* kernel/filesystem.c */
-#include <stddef.h>   // Critical: provides NULL, size_t
+// ✅ NO #include <stdio.h> or <string.h>
+// Uses kernel/types.h + GCC builtins
+
+#include "types.h"
 #include "filesystem.h"
 
-// Use GCC builtins (safe in freestanding mode)
+// Use GCC builtins (safe with -nostdinc)
 #define memset __builtin_memset
 #define memcpy __builtin_memcpy
 #define strncpy __builtin_strncpy
@@ -12,7 +15,7 @@
 #define CLUSTER_SIZE 512
 
 typedef struct {
-    char name[11];   // "FILENAME.EXT" padded
+    char name[11];
     uint8_t data[CLUSTER_SIZE];
     uint16_t size;
     uint8_t is_used;
@@ -21,7 +24,7 @@ typedef struct {
 static file_entry_t file_table[MAX_FILES];
 
 void init_filesystem(void) {
-    for (int i = 0; i < MAX_FILES; i++) {
+    for (uint16_t i = 0; i < MAX_FILES; i++) {
         memset(file_table[i].name, ' ', 11);
         file_table[i].is_used = 0;
         file_table[i].size = 0;
@@ -30,13 +33,13 @@ void init_filesystem(void) {
 }
 
 static file_entry_t* find_file(const char* name) {
-    for (int i = 0; i < MAX_FILES; i++) {
+    for (uint16_t i = 0; i < MAX_FILES; i++) {
         if (file_table[i].is_used && 
             strncmp(file_table[i].name, name, 11) == 0) {
             return &file_table[i];
         }
     }
-    return NULL;
+    return NULL;  // ✅ Works (defined in types.h)
 }
 
 file_t fs_open(const char *filename, char mode) {
@@ -44,8 +47,7 @@ file_t fs_open(const char *filename, char mode) {
 
     if (mode == 'w') {
         if (!file) {
-            // Create new file
-            for (int i = 0; i < MAX_FILES; i++) {
+            for (uint16_t i = 0; i < MAX_FILES; i++) {
                 if (!file_table[i].is_used) {
                     file = &file_table[i];
                     break;
@@ -60,7 +62,7 @@ file_t fs_open(const char *filename, char mode) {
     } else if (mode == 'r') {
         if (!file) return -1;
     } else {
-        return -1; // Invalid mode
+        return -1;
     }
 
     return (file - file_table) + 1;
@@ -96,5 +98,5 @@ int fs_read(file_t handle, void *buffer, int max_size) {
 }
 
 void fs_close(file_t handle) {
-    // No-op in this simple model
+    // No-op
 }

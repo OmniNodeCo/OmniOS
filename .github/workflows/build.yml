@@ -11,10 +11,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install Build Tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y nasm gcc build-essential qemu-system-x86
+      - name: Install Tools
+        run: sudo apt-get update && sudo apt-get install -y nasm gcc qemu-system-x86
 
       - name: Create build directory
         run: mkdir -p build
@@ -22,7 +20,7 @@ jobs:
       - name: Assemble Bootloader
         run: nasm -f elf32 boot/bootloader.asm -o boot/bootloader.o
 
-      - name: Compile Kernel (C)
+      - name: Compile Kernel
         run: |
           gcc -m32 -c kernel/main.c -o kernel/main.o \
             -ffreestanding -nostdinc -fno-stack-protector \
@@ -39,9 +37,6 @@ jobs:
           ld -m elf_i386 -T tools/linker.ld -o build/kernel.bin \
             boot/bootloader.o kernel/*.o
 
-      - name: Test OS in QEMU
-        run: |
-          timeout 5s qemu-system-i386 \
-            -nographic \
-            -serial stdio \
-            -kernel build/kernel.bin || true
+      - name: Run in QEMU
+        run: timeout 5s qemu-system-i386 \
+          -nographic -serial stdio -kernel build/kernel.bin || true
