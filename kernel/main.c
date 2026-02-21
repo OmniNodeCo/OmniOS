@@ -1,34 +1,36 @@
-// kernel/main.c
+/* kernel/main.c */
+#include <stddef.h>   // For NULL
+#include <stdint.h>   // For uint8_t, etc.
 #include "video.h"
 #include "filesystem.h"
-#include "memory.h"  // safe to include (even if empty for now)
+#include "memory.h"
 
 void kernel_main(void) {
     clear_screen();
     print_str("Initializing Kernel... OK\n");
 
-    // Initialize filesystem (simulated)
+    // Initialize virtual filesystem
     init_filesystem();
 
     print_str("Testing file I/O...\n");
 
-    // 1. Create and write to a file
+    // Write to file
     file_t f = fs_open("HELLO.TXT", 'w');
     if (f >= 0) {
         const char *msg = "Hello from my custom OS!";
         int written = fs_write(f, msg, 24);
         fs_close(f);
-        
+
         if (written == 24) {
-            print_str("File 'HELLO.TXT' written successfully.\n");
+            print_str("File 'HELLO.TXT' written.\n");
         } else {
-            print_str("Error writing file.\n");
+            print_str("Write error.\n");
         }
     } else {
-        print_str("Failed to create file.\n");
+        print_str("Failed to open file for write.\n");
     }
 
-    // 2. Read the file back
+    // Read from file
     f = fs_open("HELLO.TXT", 'r');
     if (f >= 0) {
         char buffer[100];
@@ -36,15 +38,15 @@ void kernel_main(void) {
         fs_close(f);
 
         if (bytes_read > 0) {
-            buffer[bytes_read] = '\0'; // Null-terminate
-            print_str("\nContent of HELLO.TXT: \"");
+            buffer[bytes_read] = '\0';
+            print_str("\nContent: \"");
             print_str(buffer);
             print_str("\"\n");
         } else {
-            print_str("File is empty.\n");
+            print_str("File empty.\n");
         }
     } else {
-        print_str("Failed to open file for reading.\n");
+        print_str("Failed to open file for read.\n");
     }
 
     print_str("\nSystem Halted.\n");

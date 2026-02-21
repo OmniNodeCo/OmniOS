@@ -1,20 +1,18 @@
-// kernel/filesystem.c
-#include <stddef.h>
+/* kernel/filesystem.c */
+#include <stddef.h>   // Critical: provides NULL, size_t
 #include "filesystem.h"
-// ❌ DO NOT: #include <string.h>  ← THIS CAUSES THE ERROR!
 
-// Use GCC builtins for memset/memcpy (available in freestanding mode)
+// Use GCC builtins (safe in freestanding mode)
 #define memset __builtin_memset
 #define memcpy __builtin_memcpy
-#define strlen __builtin_strlen
+#define strncpy __builtin_strncpy
 #define strncmp __builtin_strncmp
 
-// --- Data Structures ---
 #define MAX_FILES 16
 #define CLUSTER_SIZE 512
 
 typedef struct {
-    char name[11];  // "FILENAME.EXT" padded to 11 bytes
+    char name[11];   // "FILENAME.EXT" padded
     uint8_t data[CLUSTER_SIZE];
     uint16_t size;
     uint8_t is_used;
@@ -22,22 +20,19 @@ typedef struct {
 
 static file_entry_t file_table[MAX_FILES];
 
-// --- Function Implementations ---
-
 void init_filesystem(void) {
-    // Use __builtin_memset (no header needed)
     for (int i = 0; i < MAX_FILES; i++) {
-        __builtin_memset(file_table[i].name, ' ', 11);
+        memset(file_table[i].name, ' ', 11);
         file_table[i].is_used = 0;
         file_table[i].size = 0;
-        __builtin_memset(file_table[i].data, 0, CLUSTER_SIZE);
+        memset(file_table[i].data, 0, CLUSTER_SIZE);
     }
 }
 
 static file_entry_t* find_file(const char* name) {
     for (int i = 0; i < MAX_FILES; i++) {
         if (file_table[i].is_used && 
-            __builtin_strncmp(file_table[i].name, name, 11) == 0) {
+            strncmp(file_table[i].name, name, 11) == 0) {
             return &file_table[i];
         }
     }
@@ -49,24 +44,23 @@ file_t fs_open(const char *filename, char mode) {
 
     if (mode == 'w') {
         if (!file) {
-            // Find free slot
+            // Create new file
             for (int i = 0; i < MAX_FILES; i++) {
                 if (!file_table[i].is_used) {
                     file = &file_table[i];
                     break;
                 }
             }
-            if (!file) return -1; // No space
+            if (!file) return -1;
 
-            // Initialize new file
-            __builtin_strncpy((char*)file->name, filename, 11);
+            strncpy((char*)file->name, filename, 11);
             file->is_used = 1;
             file->size = 0;
         }
     } else if (mode == 'r') {
-        if (!file) return -1; // Not found
+        if (!file) return -1;
     } else {
-        return -1;
+        return -1; // Invalid mode
     }
 
     return (file - file_table) + 1;

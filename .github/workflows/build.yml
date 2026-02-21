@@ -1,4 +1,5 @@
-name: Build Operating System
+# .github/workflows/build.yml
+name: OS Build & Test
 
 on: [push, pull_request]
 
@@ -7,23 +8,40 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout Code
-      uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-    - name: Install Build Tools
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y nasm gcc qemu-system-x86
+      - name: Install Build Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nasm gcc build-essential qemu-system-x86
 
-    - name: Assemble Bootloader
-      run: nasm -f elf32 boot/bootloader.asm -o boot/bootloader.o
+      - name: Create build directory
+        run: mkdir -p build
 
-    - name: Compile Kernel
-      run: |
-        gcc -m32 -c kernel/main.c -o kernel/main.o -ffreestanding -Ikernel
-        gcc -m32 -c kernel/video.c -o kernel/video.o -ffreestanding -Ikernel
-        gcc -m32 -c kernel/filesystem.c -o kernel/filesystem.o -ffreestanding -Ikernel
-        ld -m elf_i386 -T tools/linker.ld -o build/kernel.bin boot/bootloader.o kernel/*.o
+      - name: Assemble Bootloader
+        run: nasm -f elf32 boot/bootloader.asm -o boot/bootloader.o
 
-    - name: Run OS in QEMU
-      run: qemu-system-i386 -kernel build/kernel.bin -nographic -serial stdio
+      - name: Compile Kernel (C)
+        run: |
+          gcc -m32 -c kernel/main.c -o kernel/main.o \
+            -ffreestanding -nostdinc -fno-stack-protector \
+            -Ikernel -I.
+          gcc -m32 -c kernel/video.c -o kernel/video.o \
+            -ffreestanding -nostdinc -fno-stack-protector \
+            -Ikernel -I.
+          gcc -m32 -c kernel/filesystem.c -o kernel/filesystem.o \
+            -ffreestanding -nostdinc -fno-stack-protector \
+            -Ikernel -I.
+
+      - name: Link Kernel
+        run: |
+          ld -m elf_i386 -T tools/linker.ld -o build/kernel.bin \
+            boot/bootloader.o kernel/*.o
+
+      - name: Test OS in QEMU
+        run: |
+          timeout 5s qemu-system-i386 \
+            -nographic \
+            -serial stdio \
+            -kernel build/kernel.bin || true

@@ -1,16 +1,18 @@
+/* tools/linker.ld */
 ENTRY(start)
 OUTPUT_FORMAT(elf32-i386)
-SECTIONS
-{
-    KERNEL_VMA = 0x100000; /* Load kernel at 1MB physical address */
-    . = KERNEL_VMA;
+SECTIONS {
+    . = 0x100000;            /* Kernel loads at 1MB physical address */
+    
     .text : {
-        *(.multiboot)
+        *(.multiboot)        /* Multiboot header must be first */
         *(.text)
     }
+    
     .rodata : {
         *(.rodata)
     }
+    
     .data : {
         *(.data)
         *(.bss)

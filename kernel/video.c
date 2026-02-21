@@ -1,6 +1,6 @@
-// kernel/video.c
+/* kernel/video.c */
+#include <stddef.h>
 #include "video.h"
-#include <stdint.h>
 
 #define VGA_MEMORY ((volatile uint8_t*)0xB8000)
 
@@ -12,8 +12,7 @@ void clear_screen(void) {
         VGA_MEMORY[i * 2] = ' ';
         VGA_MEMORY[i * 2 + 1] = 0x07; // Light gray on black
     }
-    x = 0;
-    y = 0;
+    x = y = 0;
 }
 
 void print_char(char c) {
@@ -44,14 +43,10 @@ void print_char(char c) {
     if (x >= 80) {
         x = 0;
         y++;
-        if (y >= 25) {
-            y = 24;
-        }
+        if (y >= 25) y = 24;
     }
 }
 
 void print_str(const char *s) {
-    while (*s) {
-        print_char(*s++);
-    }
+    while (*s) print_char(*s++);
 }
