@@ -1,12 +1,19 @@
 // kernel/filesystem.c
 #include "filesystem.h"
-#include <string.h>
+// ❌ DO NOT: #include <string.h>  ← THIS CAUSES THE ERROR!
 
+// Use GCC builtins for memset/memcpy (available in freestanding mode)
+#define memset __builtin_memset
+#define memcpy __builtin_memcpy
+#define strlen __builtin_strlen
+#define strncmp __builtin_strncmp
+
+// --- Data Structures ---
 #define MAX_FILES 16
 #define CLUSTER_SIZE 512
 
 typedef struct {
-    char name[11];      // 8.3 format: "FILENAME  EXT"
+    char name[11];  // "FILENAME.EXT" padded to 11 bytes
     uint8_t data[CLUSTER_SIZE];
     uint16_t size;
     uint8_t is_used;
@@ -14,19 +21,22 @@ typedef struct {
 
 static file_entry_t file_table[MAX_FILES];
 
+// --- Function Implementations ---
+
 void init_filesystem(void) {
+    // Use __builtin_memset (no header needed)
     for (int i = 0; i < MAX_FILES; i++) {
-        memset(file_table[i].name, ' ', 11);
+        __builtin_memset(file_table[i].name, ' ', 11);
         file_table[i].is_used = 0;
         file_table[i].size = 0;
-        memset(file_table[i].data, 0, CLUSTER_SIZE);
+        __builtin_memset(file_table[i].data, 0, CLUSTER_SIZE);
     }
 }
 
 static file_entry_t* find_file(const char* name) {
     for (int i = 0; i < MAX_FILES; i++) {
         if (file_table[i].is_used && 
-            strncmp(file_table[i].name, name, 11) == 0) {
+            __builtin_strncmp(file_table[i].name, name, 11) == 0) {
             return &file_table[i];
         }
     }
@@ -34,10 +44,8 @@ static file_entry_t* find_file(const char* name) {
 }
 
 file_t fs_open(const char *filename, char mode) {
-    // 1. Try to find existing file
     file_entry_t* file = find_file(filename);
-    
-    // 2. If writing, create a new file (or overwrite if exists)
+
     if (mode == 'w') {
         if (!file) {
             // Find free slot
@@ -50,24 +58,22 @@ file_t fs_open(const char *filename, char mode) {
             if (!file) return -1; // No space
 
             // Initialize new file
-            strncpy((char*)file->name, filename, 11);
+            __builtin_strncpy((char*)file->name, filename, 11);
             file->is_used = 1;
             file->size = 0;
         }
     } else if (mode == 'r') {
-        if (!file) return -1; // File not found
+        if (!file) return -1; // Not found
     } else {
-        return -1; // Invalid mode
+        return -1;
     }
 
-    // For simplicity, return file index + 1 (to avoid 0 = error)
     return (file - file_table) + 1;
 }
 
 int fs_write(file_t handle, const void *buffer, int size) {
     if (handle <= 0 || handle > MAX_FILES) return -1;
     file_entry_t *file = &file_table[handle - 1];
-    
     if (!file->is_used) return -1;
 
     const char *src = (const char *)buffer;
@@ -84,7 +90,6 @@ int fs_write(file_t handle, const void *buffer, int size) {
 int fs_read(file_t handle, void *buffer, int max_size) {
     if (handle <= 0 || handle > MAX_FILES) return -1;
     file_entry_t *file = &file_table[handle - 1];
-    
     if (!file->is_used || file->size == 0) return 0;
 
     char *dst = (char *)buffer;
@@ -96,6 +101,5 @@ int fs_read(file_t handle, void *buffer, int max_size) {
 }
 
 void fs_close(file_t handle) {
-    // In this simple model, closing does nothing.
-    // In a real OS: flush buffers, update directory, etc.
+    // No-op in this simple model
 }
