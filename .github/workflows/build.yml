@@ -13,32 +13,36 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup ISO Cache Directory
+        run: mkdir -p iso
+
       - name: Cache Ubuntu ISO
         uses: actions/cache@v4
         with:
           path: iso/
           key: ubuntu-iso-24.04.1
+          restore-keys: |
+            ubuntu-iso-24.04.1-
 
-      - name: Install required packages
+      - name: Download Ubuntu ISO (only if not cached)
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            xorriso squashfs-tools rsync wget genisoimage
-
-      - name: Download or use existing Ubuntu ISO
-        run: |
-          mkdir -p iso
           UBUNTU_VERSION="24.04.1"
           UBUNTU_ISO="ubuntu-${UBUNTU_VERSION}-desktop-amd64.iso"
           DOWNLOAD_URL="https://releases.ubuntu.com/${UBUNTU_VERSION}/${UBUNTU_ISO}"
 
           if [ -f "iso/${UBUNTU_ISO}" ]; then
-            echo "✅ Found existing/cached ISO: iso/${UBUNTU_ISO}"
+            echo "✅ Using cached ISO: iso/${UBUNTU_ISO}"
           else
-            echo "⬇️ Downloading Ubuntu ISO..."
+            echo "⬇️ Downloading Ubuntu ISO (will be cached)..."
             wget -c "$DOWNLOAD_URL" -O "iso/${UBUNTU_ISO}"
             echo "✅ Download complete"
           fi
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            xorriso squashfs-tools rsync wget genisoimage
 
       - name: Customize the ISO
         run: bash scripts/customize.sh
