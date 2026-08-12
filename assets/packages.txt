@@ -9,3 +9,12 @@ build-essential
 gnome-tweaks
 vlc
 firefox-esr
+nano
+tree
+unzip
+zip
+net-tools
+openssh-server
+python3-pip
+tmux
+zsh
