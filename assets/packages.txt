@@ -1,0 +1,11 @@
+# Packages to install during customization
+vim
+htop
+neofetch
+curl
+wget
+git
+build-essential
+gnome-tweaks
+vlc
+firefox-esr
