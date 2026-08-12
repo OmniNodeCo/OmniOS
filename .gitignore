@@ -1,6 +1,7 @@
 # Downloaded source images and generated bundles
 iso/
 out/
+build/
 *.iso
 *.iso.part
 

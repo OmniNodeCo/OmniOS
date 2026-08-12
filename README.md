@@ -1,18 +1,121 @@
-# OmniOS Ubuntu Image
+# OmniOS
 
-This repository turns an Ubuntu 24.04 LTS Desktop image into **OmniOS 1.0** using [Cubic](https://github.com/PJ-Singh-001/Cubic). Cubic handles the live filesystem, bootloader, installer, and final ISO. The scripts in this repository make package installation and branding repeatable.
+**OmniOS 1.0** is a separately branded desktop operating-system image built on the Ubuntu 24.04 LTS foundation. It keeps Ubuntu's kernel, drivers, package repositories, signed boot chain, and desktop installer while supplying its own identity, package selection, wallpaper, defaults, boot labels, and installable filesystem.
 
-## What is included
+The final output is a bootable hybrid AMD64 ISO that supports a live session and installation.
 
-- A Cubic-safe chroot customization script
-- OmniOS operating-system identity, MOTD, and GNOME wallpaper
-- An editable Ubuntu package list
-- A verified local Ubuntu ISO downloader that reuses its cached copy
-- A GitHub Actions workflow that caches the large base ISO by SHA-256
+## What the automated builder changes
 
-## Host requirements
+The remaster process:
 
-Use an Ubuntu desktop host with approximately 20 GB of free working space. Install Cubic on the host:
+1. verifies an official Ubuntu Desktop ISO;
+2. combines Ubuntu's layered install filesystem;
+3. installs the OmniOS package selection in an isolated chroot;
+4. applies OmniOS release identity and desktop branding;
+5. creates a complete `omnios.squashfs` install image;
+6. creates an `omnios.live.squashfs` live-session layer;
+7. replaces Ubuntu's installer source list with **OmniOS Desktop**;
+8. changes the ISO and GRUB labels to OmniOS;
+9. regenerates manifests and checksums; and
+10. replays Ubuntu's original BIOS/UEFI boot configuration into the new ISO.
+
+The builder removes the original `minimal.*` filesystem variants from the output. This ensures the installer deploys the customized OmniOS filesystem instead of offering an unmodified Ubuntu installation.
+
+## OmniOS customizations
+
+- Operating-system ID: `omnios`
+- Product name: `OmniOS 1.0`
+- Ubuntu compatibility declaration: `ID_LIKE="ubuntu debian"`
+- Custom MOTD, console identity, GRUB distributor, and release metadata
+- Custom GNOME wallpaper and background defaults
+- Additional packages from `assets/packages.txt`
+- Optional project commands in `assets/customize-extra.sh`
+
+Ubuntu remains the upstream package and hardware-enablement foundation. Do not replace the Ubuntu APT sources unless you operate and sign your own compatible package repositories.
+
+## Automated GitHub Actions build
+
+Add the prepared workflow as:
+
+```text
+.github/workflows/build.yml
+```
+
+Run **Build OmniOS ISO** from the Actions page. The workflow:
+
+- resolves the current Ubuntu 24.04 LTS point release;
+- caches the verified Ubuntu ISO using its official SHA-256 digest;
+- downloads the base ISO only on a cache miss;
+- frees enough GitHub runner space for the remaster;
+- builds and validates the bootable OmniOS ISO; and
+- uploads `OmniOS-1.0-amd64.iso` with its SHA-256 file.
+
+Scheduled runs refresh only the Ubuntu cache. They do not perform the expensive final ISO build.
+
+The downloadable artifact is named:
+
+```text
+OmniOS-1.0-amd64
+```
+
+## Build locally without Cubic
+
+### Requirements
+
+Use an x86-64 Ubuntu host with at least 35 GB of free disk space. Install the build tools:
+
+```bash
+sudo apt update
+sudo apt install squashfs-tools xorriso
+```
+
+### 1. Download and verify Ubuntu
+
+```bash
+bash scripts/download-ubuntu.sh
+```
+
+The downloader stores the ISO under `iso/`. Future runs verify and reuse that copy. To request a particular still-published point release:
+
+```bash
+UBUNTU_VERSION=24.04.4 bash scripts/download-ubuntu.sh
+```
+
+### 2. Build OmniOS
+
+```bash
+sudo bash scripts/build-iso.sh
+```
+
+Or specify all paths:
+
+```bash
+sudo bash scripts/build-iso.sh \
+  --source iso/ubuntu-24.04.4-desktop-amd64.iso \
+  --output out/OmniOS-1.0-amd64.iso
+```
+
+The output directory will contain:
+
+```text
+out/OmniOS-1.0-amd64.iso
+out/OmniOS-1.0-amd64.iso.sha256
+```
+
+Verify the image:
+
+```bash
+cd out
+sha256sum --check OmniOS-1.0-amd64.iso.sha256
+```
+
+Use `--keep-work` to preserve extracted layers for debugging. Control SquashFS parallelism with `SQUASHFS_PROCESSORS`; the default is capped at four workers to avoid exhausting memory.
+
+## Optional Cubic build
+
+Cubic remains available as an interactive alternative. It is not used by the automated ISO builder.
+
+Install Cubic on an Ubuntu desktop host:
 
 ```bash
 sudo add-apt-repository universe
@@ -21,134 +124,64 @@ sudo apt update
 sudo apt install --no-install-recommends cubic
 ```
 
-Do not install Cubic inside the customized image.
-
-## Build OmniOS with Cubic
-
-### 1. Prepare the source ISO and bundle
-
-From this repository, run:
+Prepare the verified Ubuntu source and Cubic bundle:
 
 ```bash
 bash scripts/prepare-cubic.sh
 ```
 
-This command:
-
-1. resolves the latest published Ubuntu 24.04 LTS Desktop point release;
-2. downloads it into `iso/` only when no valid local copy exists;
-3. verifies the official SHA-256 checksum; and
-4. creates `out/omnios-cubic-bundle.tar.gz`.
-
-A later run verifies and reuses the ISO instead of downloading it again. To request a specific available point release:
-
-```bash
-UBUNTU_VERSION=24.04.4 bash scripts/prepare-cubic.sh
-```
-
-### 2. Create a Cubic project
-
-Open Cubic:
-
-```bash
-cubic
-```
-
-Choose a new project directory and select the ISO from this repository's `iso/` directory. Continue until Cubic opens the **Terminal** page.
-
-### 3. Run the customization inside Cubic
-
-Cubic's Terminal is already running as root; do not use `sudo` there.
-
-In Cubic's Terminal, change to `/tmp`:
+Open Cubic, select the ISO under `iso/`, and continue to Cubic's Terminal page. In that terminal:
 
 ```bash
 cd /tmp
-```
-
-Use Cubic's copy button, context menu, or drag-and-drop support to copy `out/omnios-cubic-bundle.tar.gz` from the host into `/tmp`. Then run:
-
-```bash
+# Copy out/omnios-cubic-bundle.tar.gz here using Cubic's copy button.
 tar -xzf omnios-cubic-bundle.tar.gz
 bash scripts/customize.sh
 ```
 
-The customization script refuses to run on the host by default. Inside Cubic it will:
+Then complete and test the image through Cubic's GUI.
 
-- install packages from `assets/packages.txt`;
-- prevent package hooks from trying to start services in the chroot;
-- install OmniOS release identity files;
-- install the OmniOS wallpaper and GNOME defaults;
-- run `assets/customize-extra.sh`; and
-- clean APT data to reduce the final image size.
+## Customize the package set
 
-When it finishes, click **Next** in Cubic. Review Cubic's package and kernel selections, generate the ISO, and test both its live environment and installer in a virtual machine before using it on hardware.
+Edit `assets/packages.txt`. Blank lines and `#` comments are accepted. Package names must exist in Ubuntu's enabled repositories.
 
-## Customize OmniOS
-
-### Package selection
-
-Edit `assets/packages.txt`. Blank lines and `#` comments are supported. Use packages available from Ubuntu's enabled APT repositories. Ubuntu Desktop already provides Firefox as a snap, so it does not need to be installed from Cubic.
-
-Validate the package list and assets without modifying the host:
+Check the customization plan without changing the host:
 
 ```bash
 bash scripts/customize.sh --dry-run
 ```
 
-### Branding
+The script deliberately refuses to perform a real customization outside a chroot.
 
-Edit these files:
+## Customize branding
+
+The main identity and desktop files are:
 
 - `assets/os-release`
 - `assets/lsb-release`
 - `assets/omnios-release`
+- `assets/issue`
 - `assets/motd`
+- `assets/99-omnios-grub.cfg`
 - `assets/omnios-default.svg`
 - `assets/90-omnios.gschema.override`
+- `assets/omnios-wallpapers.xml`
 
-Place additional repeatable commands in `assets/customize-extra.sh`.
+Add further repeatable commands to `assets/customize-extra.sh`.
 
-### Customization options
+## Testing before release
 
-```text
---packages FILE    Use a different package list
---skip-packages    Install branding without extra packages
---skip-branding    Install packages without OmniOS branding
---keep-apt-cache   Retain APT indexes and downloaded packages
---dry-run          Validate and print the plan without changing files
-```
+A successful build verifies the ISO tree and El Torito boot records, but it does not prove that every firmware or installer path works. Before distributing a release:
 
-## ISO caching
+1. verify its SHA-256 checksum;
+2. boot the ISO in both UEFI and legacy BIOS virtual machines;
+3. test the live desktop;
+4. perform a complete installation onto an empty virtual disk;
+5. reboot into the installed system; and
+6. confirm networking, graphics, audio, package updates, and the OmniOS identity.
 
-### Local cache
-
-`scripts/download-ubuntu.sh` stores the verified ISO in `iso/`. It checks the cached file before downloading, and a `.gitignore` rule prevents the multi-gigabyte image from entering Git.
-
-Metadata can be resolved without downloading the image:
-
-```bash
-bash scripts/download-ubuntu.sh --metadata-only
-```
-
-### GitHub Actions cache
-
-Add `build.yml` at `.github/workflows/build.yml`. It resolves the official image checksum and uses it as the `actions/cache` key. The workflow:
-
-- restores the exact ISO when it is already cached;
-- downloads only on a cache miss;
-- verifies restored and downloaded images;
-- packages and uploads `omnios-cubic-bundle.tar.gz`; and
-- runs periodically to keep the ISO cache active.
-
-Run **Build OmniOS Cubic Assets** from the repository's Actions page. Scheduled workflows run from the default branch after the workflow is added there.
-
-GitHub's Actions cache is for reuse by GitHub-hosted workflows; it does not place the ISO onto your Cubic desktop host. Use `scripts/prepare-cubic.sh` for the local copy.
-
-## Important limitation
-
-Cubic is an interactive desktop application and does not provide an unattended ISO-build command. GitHub Actions can cache and verify the base ISO, but the final OmniOS ISO must be generated and tested through Cubic.
+Keep Secure Boot enabled for one UEFI test because the image reuses Ubuntu's signed boot components.
 
 ## License
 
-The repository scripts and original OmniOS assets are available under the [MIT License](LICENSE). Ubuntu and included packages retain their respective licenses and trademarks.
+The repository scripts and original OmniOS assets are available under the [MIT License](LICENSE). Ubuntu, its boot components, and included packages retain their own licenses and trademarks.

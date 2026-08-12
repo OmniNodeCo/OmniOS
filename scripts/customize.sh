@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Apply OmniOS packages and branding inside Cubic's Terminal environment.
+# Apply OmniOS packages and branding in Cubic or an automated build chroot.
 set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -17,7 +17,7 @@ usage() {
   cat <<'EOF'
 Usage: scripts/customize.sh [options]
 
-Run this script as root on Cubic's Terminal page.
+Run this script as root in Cubic's Terminal or the automated build chroot.
 
 Options:
   --packages FILE    Read packages from FILE
@@ -90,6 +90,8 @@ branding_files=(
   "$ASSETS_DIR/lsb-release"
   "$ASSETS_DIR/omnios-release"
   "$ASSETS_DIR/motd"
+  "$ASSETS_DIR/issue"
+  "$ASSETS_DIR/99-omnios-grub.cfg"
   "$ASSETS_DIR/omnios-default.svg"
   "$ASSETS_DIR/omnios-wallpapers.xml"
   "$ASSETS_DIR/90-omnios.gschema.override"
@@ -115,10 +117,10 @@ if [[ "$DRY_RUN" == true ]]; then
   exit 0
 fi
 
-((EUID == 0)) || fail "Cubic's Terminal runs as root; execute this script there without sudo"
+((EUID == 0)) || fail 'run this script as root inside an isolated image chroot'
 command -v apt-get >/dev/null 2>&1 || fail 'apt-get is required'
 if [[ "$ALLOW_HOST" == false ]] && ! is_chroot; then
-  fail "no chroot detected; refusing to modify the host (run this in Cubic)"
+  fail 'no chroot detected; refusing to modify the host'
 fi
 
 trap cleanup EXIT
@@ -126,8 +128,8 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-# Package post-install hooks must not try to start services in Cubic's static
-# filesystem. Preserve an existing policy supplied by Cubic.
+# Package post-install hooks must not try to start services in the static
+# build filesystem. Preserve a policy already supplied by the build tool.
 if [[ ! -e /usr/sbin/policy-rc.d ]]; then
   cat > /usr/sbin/policy-rc.d <<'EOF'
 #!/bin/sh
@@ -158,6 +160,10 @@ if [[ "$SKIP_BRANDING" == false ]]; then
   install -Dm0644 "$ASSETS_DIR/lsb-release" /etc/lsb-release
   install -Dm0644 "$ASSETS_DIR/omnios-release" /etc/omnios-release
   install -Dm0644 "$ASSETS_DIR/motd" /etc/motd
+  install -Dm0644 "$ASSETS_DIR/issue" /etc/issue
+  install -Dm0644 "$ASSETS_DIR/issue" /etc/issue.net
+  install -Dm0644 "$ASSETS_DIR/99-omnios-grub.cfg" \
+    /etc/default/grub.d/99-omnios.cfg
   install -Dm0644 "$ASSETS_DIR/omnios-default.svg" \
     /usr/share/backgrounds/omnios/omnios-default.svg
   install -Dm0644 "$ASSETS_DIR/omnios-wallpapers.xml" \
@@ -184,4 +190,4 @@ fi
 
 cleanup
 trap - EXIT HUP INT TERM
-log 'Customization complete; return to Cubic and click Next'
+log 'OmniOS filesystem customization complete'
