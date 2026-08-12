@@ -1,4 +1,4 @@
-name: Build OmniOS Cubic Assets
+name: Build OmniOS ISO
 
 on:
   workflow_dispatch:
@@ -9,21 +9,21 @@ on:
         default: latest
         type: string
   schedule:
-    # Access the cache regularly so GitHub does not evict an otherwise idle ISO.
+    # Refresh the cached Ubuntu ISO without rebuilding OmniOS.
     - cron: "17 3 */5 * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: omnios-cubic-build
+  group: omnios-iso-build
   cancel-in-progress: false
 
 jobs:
-  prepare:
-    name: Prepare OmniOS Cubic inputs
+  build:
+    name: Build OmniOS from Ubuntu
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 300
 
     env:
       REQUESTED_VERSION: ${{ inputs.ubuntu_version || 'latest' }}
@@ -35,11 +35,23 @@ jobs:
       - name: Validate customization scripts
         run: bash -n scripts/*.sh assets/*.sh
 
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf \
+            /usr/local/lib/android \
+            /usr/share/dotnet \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL || true
+
+          sudo apt-get clean
+          df -h /
+
       - name: Resolve the Ubuntu release
         id: release
         env:
           UBUNTU_VERSION: ${{ env.REQUESTED_VERSION }}
-        run: bash scripts/resolve-ubuntu-release.sh >> "$GITHUB_OUTPUT"
+        run: |
+          bash scripts/resolve-ubuntu-release.sh >> "$GITHUB_OUTPUT"
 
       - name: Restore the verified Ubuntu ISO
         id: iso-cache
@@ -53,7 +65,8 @@ jobs:
         env:
           UBUNTU_VERSION: ${{ steps.release.outputs.version }}
           ISO_DIR: iso
-        run: bash scripts/download-ubuntu.sh
+        run: |
+          bash scripts/download-ubuntu.sh
 
       - name: Verify the restored or downloaded ISO
         env:
@@ -63,16 +76,44 @@ jobs:
           printf '%s *%s\n' "$ISO_SHA256" "$ISO_NAME" \
             | (cd iso && sha256sum --check -)
 
-      - name: Create the OmniOS Cubic bundle
-        run: bash scripts/prepare-cubic.sh --no-download
+      - name: Install ISO build tools
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            squashfs-tools \
+            xorriso
 
-      - name: Upload the Cubic customization bundle
+      - name: Build the bootable OmniOS ISO
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          SOURCE_ISO: iso/${{ steps.release.outputs.iso }}
+          OUTPUT_ISO: out/OmniOS-1.0-amd64.iso
+          SQUASHFS_PROCESSORS: "2"
+        run: |
+          sudo --preserve-env=SOURCE_ISO,OUTPUT_ISO,SQUASHFS_PROCESSORS \
+            bash scripts/build-iso.sh
+
+          sudo chown -R "$USER:$USER" out
+          df -h /
+
+      - name: Verify the OmniOS checksum
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          cd out
+          sha256sum --check OmniOS-1.0-amd64.iso.sha256
+
+      - name: Upload OmniOS ISO
+        if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
-          name: omnios-cubic-bundle
-          path: out/omnios-cubic-bundle.tar.gz
+          name: OmniOS-1.0-amd64
+          path: |
+            out/OmniOS-1.0-amd64.iso
+            out/OmniOS-1.0-amd64.iso.sha256
           if-no-files-found: error
-          retention-days: 30
+          compression-level: 0
+          retention-days: 14
 
       - name: Write job summary
         env:
@@ -81,14 +122,17 @@ jobs:
           ISO_SHA256: ${{ steps.release.outputs.sha256 }}
         run: |
           {
-            echo "## OmniOS Cubic build inputs"
+            echo "## OmniOS build"
             echo
             echo "- Base image: \`$ISO_NAME\`"
-            echo "- SHA-256: \`$ISO_SHA256\`"
+            echo "- Base SHA-256: \`$ISO_SHA256\`"
             echo "- Existing ISO cache restored: \`${CACHE_HIT:-false}\`"
-            echo "- Artifact: \`omnios-cubic-bundle\`"
-          } >> "$GITHUB_STEP_SUMMARY"
 
-# Cubic is an interactive GUI and has no unattended final-ISO build command.
-# This workflow caches the Ubuntu base and packages the repeatable OmniOS
-# customizations. Generate and test the final OmniOS ISO in Cubic.
+            if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+              echo "- Output artifact: \`OmniOS-1.0-amd64\`"
+              echo "- Output image: \`OmniOS-1.0-amd64.iso\`"
+            else
+              echo "- Scheduled cache refresh completed."
+              echo "- No final OmniOS ISO was built during this scheduled run."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
