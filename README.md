@@ -1,53 +1,50 @@
 # Ubuntu Custom ISO Builder
 
-This repository allows you to create your own customized Ubuntu-based operating system.
+This repository helps you create your own customized Ubuntu-based operating system.
 
-## Features
-- Download the latest Ubuntu ISO (or use an existing one)
-- Customize packages, wallpaper, hostname, etc.
-- Build a new bootable Ubuntu-based ISO
+## Recommended Method: Cubic (Easiest & Most Reliable)
 
-## How to Use
+We **strongly recommend** using **[Cubic](https://github.com/PJ-Singh-UK/Cubic)** — a dedicated GUI tool for customizing Ubuntu ISOs.
 
-### 1. Download Ubuntu ISO (optional)
-```bash
+### Why Cubic?
+- Handles complex squashfs extraction properly
+- Provides a real chroot environment
+- Much more stable than manual scripts
+- Supports Ubuntu 24.04+
+
+### How to Use Cubic
+
+1. **Install Cubic**:
+   ```bash
+   sudo apt-add-repository ppa:cubic-wizard/release
+   sudo apt update
+   sudo apt install cubic
+
+    Run Cubic:
+
+    Bash
+
+    cubic
+
+    Follow the GUI:
+        Select your Ubuntu ISO
+        Customize packages, files, settings, etc.
+        Build your custom ISO
+
+Alternative: Script-based Method (Advanced)
+
+If you prefer scripts, you can still use them, but results may vary depending on the ISO.
+Steps
+
+Bash
+
+# 1. Download Ubuntu ISO (or place it in iso/ folder)
 bash scripts/download-ubuntu.sh
-```
 
-If you already have `ubuntu-24.04.1-desktop-amd64.iso` in the `iso/` folder, it will be used automatically.
-
-### 2. Customize
-Edit `scripts/customize.sh` to add packages, change settings, etc.
-
-Then run:
-```bash
+# 2. Customize (edit assets/packages.txt first)
 bash scripts/customize.sh
-```
 
-### 3. Build Custom ISO
-```bash
+# 3. Build the ISO
 bash scripts/build-iso.sh
-```
 
-Your customized ISO will be saved in the `out/` folder.
-
-## Folder Structure
-```
-.
-├── README.md
-├── scripts/
-│   ├── download-ubuntu.sh
-│   ├── customize.sh
-│   └── build-iso.sh
-├── iso/          # Place original Ubuntu ISO here
-└── out/          # Final custom ISO will appear here
-```
-
-## Requirements
-- Ubuntu 22.04+ or Debian-based system
-- `sudo` access
-- At least 8GB RAM and 20GB free space
-
----
-
-Create your own Ubuntu-based OS easily!
+Your final ISO will appear in the out/ folder.
