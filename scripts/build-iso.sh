@@ -316,10 +316,12 @@ xorriso_args=(
   -overwrite on
 )
 while IFS= read -r -d '' file; do
-  xorriso_args+=( -rm "/casper/$(basename -- "$file")" )
+  # -rm accepts a variable-length path list. The -- delimiter prevents it from
+  # consuming the next xorriso command as another path.
+  xorriso_args+=( -rm "/casper/$(basename -- "$file")" -- )
 done < <(find "$ISO_MOUNT/casper" -maxdepth 1 -type f -name 'minimal*' -print0)
 xorriso_args+=(
-  -rm /casper/SHA256SUMS.gpg
+  -rm /casper/SHA256SUMS.gpg --
   -map "$OMNIOS_SQUASHFS" /casper/omnios.squashfs
   -map "$OMNIOS_LIVE_SQUASHFS" /casper/omnios.live.squashfs
   -map "$GENERATED/omnios.manifest" /casper/omnios.manifest
