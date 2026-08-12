@@ -1,0 +1,22 @@
+# Additional packages installed into the Ubuntu filesystem by Cubic.
+# Use package names from Ubuntu's enabled APT repositories.
+curl
+git
+vim
+htop
+jq
+unzip
+zip
+tree
+build-essential
+gnome-tweaks
+vlc
+openssh-server
+python3-pip
+tmux
+zsh
+neovim
+fzf
+ripgrep
+bat
+net-tools

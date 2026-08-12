@@ -1,0 +1,12 @@
+[org.gnome.desktop.background]
+picture-uri='file:///usr/share/backgrounds/omnios/omnios-default.svg'
+picture-uri-dark='file:///usr/share/backgrounds/omnios/omnios-default.svg'
+picture-options='zoom'
+primary-color='#071426'
+secondary-color='#123B60'
+
+[org.gnome.desktop.screensaver]
+picture-uri='file:///usr/share/backgrounds/omnios/omnios-default.svg'
+picture-options='zoom'
+primary-color='#071426'
+secondary-color='#123B60'

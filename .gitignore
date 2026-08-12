@@ -1,0 +1,16 @@
+# Downloaded source images and generated bundles
+iso/
+out/
+*.iso
+*.iso.part
+
+# Cubic project directories can contain an extracted root filesystem.
+cubic-project/
+projects/
+
+# Logs and editor/OS files
+*.log
+.DS_Store
+Thumbs.db
+*.swp
+*~
