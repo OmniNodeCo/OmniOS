@@ -1,0 +1,31 @@
+name: Build Custom Ubuntu ISO
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master, ubuntu-custom ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get install -y xorriso squashfs-tools rsync wget
+
+      - name: Download or use ISO
+        run: bash scripts/download-ubuntu.sh
+
+      - name: Customize
+        run: bash scripts/customize.sh
+
+      - name: Build ISO
+        run: bash scripts/build-iso.sh
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ubuntu-custom-iso
+          path: out/*.iso
+          retention-days: 30
