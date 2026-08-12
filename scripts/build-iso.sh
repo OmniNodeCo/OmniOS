@@ -136,7 +136,8 @@ GENERATED="$WORK_DIR/generated"
 
 rm -rf -- "$WORK_DIR"
 mkdir -p \
-  "$ISO_MOUNT" "$BASE_MOUNT" "$STANDARD_WORK" "$STANDARD_ROOT" \
+  "$ISO_MOUNT" "$BASE_MOUNT" "$WORK_DIR/layers" \
+  "$STANDARD_WORK" "$STANDARD_ROOT" \
   "$OMNIOS_MOUNT" "$LIVE_WORK" "$LIVE_ROOT" "$GENERATED" \
   "$(dirname -- "$OUTPUT_ISO")"
 
