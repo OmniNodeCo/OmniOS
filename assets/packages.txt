@@ -1,4 +1,8 @@
-# Packages to install during customization
+# Debian packages installed in Cubic's chroot, separated by whitespace.
+#
+# Ubuntu Desktop already provides Firefox as a snap. Cubic cannot install
+# snaps from its Terminal environment, and firefox-esr is not in Ubuntu's
+# standard repositories, so neither package is listed here.
 vim
 htop
 neofetch
@@ -8,7 +12,6 @@ git
 build-essential
 gnome-tweaks
 vlc
-firefox-esr
 nano
 tree
 unzip

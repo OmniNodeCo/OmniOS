@@ -1,63 +1,38 @@
-name: Build Custom Ubuntu ISO
+name: Validate Cubic customization
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master, ubuntu-custom ]
+    branches: [ubuntu-custom]
+  pull_request:
+    branches: [ubuntu-custom]
+
+permissions:
+  contents: read
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
+  validate:
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup ISO Cache Directory
-        run: mkdir -p iso
-
-      - name: Cache Ubuntu ISO
-        uses: actions/cache@v4
-        with:
-          path: iso/
-          key: ubuntu-iso-24.04.1
-          restore-keys: |
-            ubuntu-iso-24.04.1-
-
-      - name: Download Ubuntu ISO (only if not cached)
+      - name: Install shellcheck
         run: |
-          UBUNTU_VERSION="24.04.1"
-          UBUNTU_ISO="ubuntu-${UBUNTU_VERSION}-desktop-amd64.iso"
-          DOWNLOAD_URL="https://releases.ubuntu.com/${UBUNTU_VERSION}/${UBUNTU_ISO}"
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
 
-          if [ -f "iso/${UBUNTU_ISO}" ]; then
-            echo "✅ Using cached ISO: iso/${UBUNTU_ISO}"
-          else
-            echo "⬇️ Downloading Ubuntu ISO (will be cached)..."
-            wget -c "$DOWNLOAD_URL" -O "iso/${UBUNTU_ISO}"
-            echo "✅ Download complete"
-          fi
-
-      - name: Install build tools
+      - name: Check shell syntax
         run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            xorriso squashfs-tools rsync wget genisoimage
+          bash -n scripts/*.sh assets/*.sh
+          shellcheck scripts/*.sh assets/*.sh
 
-      - name: Customize the ISO
-        run: bash scripts/customize.sh
+      - name: Validate the Cubic customization plan
+        run: bash scripts/customize.sh --dry-run
 
-      - name: Build the final ISO
-        run: bash scripts/build-iso.sh
+      - name: Check launcher help
+        run: bash scripts/build-iso.sh --help
 
-      - name: Upload Custom Ubuntu ISO
-        uses: actions/upload-artifact@v4
-        with:
-          name: ubuntu-custom-iso
-          path: out/*.iso
-          retention-days: 30
-
-      - name: Show build summary
-        run: |
-          echo "✅ Custom Ubuntu ISO build completed!"
-          ls -lh out/
+# Cubic is a desktop GUI and does not provide an unattended ISO build CLI.
+# This workflow validates the scripts; create and test the ISO in Cubic.
