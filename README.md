@@ -47,8 +47,10 @@ Run **Build OmniOS ISO** from the Actions page. The workflow:
 - caches the verified Ubuntu ISO using its official SHA-256 digest;
 - downloads the base ISO only on a cache miss;
 - frees enough GitHub runner space for the remaster;
-- builds and validates the bootable OmniOS ISO; and
-- uploads `OmniOS-1.0-amd64.iso` with its SHA-256 file.
+- builds and validates the bootable OmniOS ISO;
+- boots the generated live filesystem in headless QEMU and requires systemd to reach a boot-complete target;
+- uploads a QEMU serial log for diagnostics; and
+- uploads `OmniOS-1.0-amd64.iso` with its SHA-256 file only after the boot smoke test passes.
 
 Scheduled runs refresh only the Ubuntu cache. They do not perform the expensive final ISO build.
 
