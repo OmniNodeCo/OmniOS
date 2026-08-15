@@ -8,8 +8,9 @@ on:
         required: true
         default: latest
         type: string
+
   schedule:
-    # Refresh the cached Ubuntu ISO without rebuilding OmniOS.
+    # Refresh the Ubuntu ISO cache without rebuilding OmniOS.
     - cron: "17 3 */5 * *"
 
 permissions:
@@ -21,7 +22,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build OmniOS from Ubuntu
+    name: Build and test OmniOS
     runs-on: ubuntu-24.04
     timeout-minutes: 300
 
@@ -30,10 +31,11 @@ jobs:
 
     steps:
       - name: Check out OmniOS
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Validate customization scripts
-        run: bash -n scripts/*.sh assets/*.sh
+        run: |
+          bash -n scripts/*.sh assets/*.sh
 
       - name: Free runner disk space
         run: |
@@ -55,7 +57,7 @@ jobs:
 
       - name: Restore the verified Ubuntu ISO
         id: iso-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: iso/${{ steps.release.outputs.iso }}
           key: ubuntu-desktop-amd64-${{ steps.release.outputs.sha256 }}
@@ -68,7 +70,7 @@ jobs:
         run: |
           bash scripts/download-ubuntu.sh
 
-      - name: Verify the restored or downloaded ISO
+      - name: Verify the restored or downloaded Ubuntu ISO
         env:
           ISO_NAME: ${{ steps.release.outputs.iso }}
           ISO_SHA256: ${{ steps.release.outputs.sha256 }}
@@ -76,11 +78,13 @@ jobs:
           printf '%s *%s\n' "$ISO_SHA256" "$ISO_NAME" \
             | (cd iso && sha256sum --check -)
 
-      - name: Install ISO build tools
+      - name: Install ISO and QEMU build tools
         if: github.event_name == 'workflow_dispatch'
         run: |
           sudo apt-get update
+
           sudo apt-get install --yes \
+            qemu-system-x86 \
             squashfs-tools \
             xorriso
 
@@ -103,6 +107,26 @@ jobs:
           cd out
           sha256sum --check OmniOS-1.0-amd64.iso.sha256
 
+      - name: Smoke test the OmniOS live boot in QEMU
+        id: smoke-test
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          BOOT_TIMEOUT: "600"
+          BOOT_MEMORY: "4096"
+          BOOT_CPUS: "2"
+          BOOT_LOG: out/qemu-boot.log
+        run: |
+          bash scripts/test-iso.sh out/OmniOS-1.0-amd64.iso
+
+      - name: Upload QEMU boot diagnostics
+        if: always() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmniOS-QEMU-boot-log
+          path: out/qemu-boot.log
+          if-no-files-found: ignore
+          retention-days: 14
+
       - name: Upload OmniOS ISO
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4
@@ -116,21 +140,30 @@ jobs:
           retention-days: 14
 
       - name: Write job summary
+        if: always()
         env:
           CACHE_HIT: ${{ steps.iso-cache.outputs.cache-hit }}
           ISO_NAME: ${{ steps.release.outputs.iso }}
           ISO_SHA256: ${{ steps.release.outputs.sha256 }}
+          SMOKE_TEST: ${{ steps.smoke-test.outcome }}
         run: |
           {
             echo "## OmniOS build"
             echo
-            echo "- Base image: \`$ISO_NAME\`"
-            echo "- Base SHA-256: \`$ISO_SHA256\`"
+            echo "- Base image: \`${ISO_NAME:-not resolved}\`"
+            echo "- Base SHA-256: \`${ISO_SHA256:-not resolved}\`"
             echo "- Existing ISO cache restored: \`${CACHE_HIT:-false}\`"
 
             if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-              echo "- Output artifact: \`OmniOS-1.0-amd64\`"
-              echo "- Output image: \`OmniOS-1.0-amd64.iso\`"
+              echo "- QEMU boot test: \`${SMOKE_TEST:-not run}\`"
+
+              if [[ "$SMOKE_TEST" == "success" ]]; then
+                echo "- Output artifact: \`OmniOS-1.0-amd64\`"
+                echo "- Output image: \`OmniOS-1.0-amd64.iso\`"
+              else
+                echo "- The final ISO artifact was not published because the build or boot test failed."
+                echo "- Download \`OmniOS-QEMU-boot-log\` for diagnostics."
+              fi
             else
               echo "- Scheduled cache refresh completed."
               echo "- No final OmniOS ISO was built during this scheduled run."
