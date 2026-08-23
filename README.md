@@ -12,14 +12,14 @@ The remaster process:
 2. combines Ubuntu's layered install filesystem;
 3. installs the OmniOS package selection in an isolated chroot;
 4. applies OmniOS release identity and desktop branding;
-5. creates a complete `omnios.squashfs` install image;
-6. creates an `omnios.live.squashfs` live-session layer;
+5. replaces `minimal.standard.squashfs` with the complete OmniOS install image while keeping its original filename;
+6. replaces `minimal.standard.live.squashfs` with the OmniOS live-session layer while keeping its original filename;
 7. replaces Ubuntu's installer source list with **OmniOS Desktop**;
 8. changes the ISO and GRUB labels to OmniOS;
 9. regenerates manifests and checksums; and
 10. replays Ubuntu's original BIOS/UEFI boot configuration into the new ISO.
 
-The builder removes the original `minimal.*` filesystem variants from the output. This ensures the installer deploys the customized OmniOS filesystem instead of offering an unmodified Ubuntu installation.
+The builder preserves Ubuntu's original Casper layer filenames and replaces the standard install and live files in place. Untouched support layers keep their original names, while the installer catalog exposes only the customized **OmniOS Desktop** source.
 
 ## OmniOS customizations
 

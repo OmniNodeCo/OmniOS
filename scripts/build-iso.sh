@@ -126,12 +126,12 @@ BASE_MOUNT="$WORK_DIR/mnt/base"
 STANDARD_UPPER="$WORK_DIR/layers/standard"
 STANDARD_WORK="$WORK_DIR/overlay-work/standard"
 STANDARD_ROOT="$WORK_DIR/mnt/standard-root"
-OMNIOS_SQUASHFS="$WORK_DIR/generated/omnios.squashfs"
+STANDARD_SQUASHFS="$WORK_DIR/generated/minimal.standard.squashfs"
 OMNIOS_MOUNT="$WORK_DIR/mnt/omnios"
 LIVE_UPPER="$WORK_DIR/layers/live"
 LIVE_WORK="$WORK_DIR/overlay-work/live"
 LIVE_ROOT="$WORK_DIR/mnt/live-root"
-OMNIOS_LIVE_SQUASHFS="$WORK_DIR/generated/omnios.live.squashfs"
+LIVE_SQUASHFS="$WORK_DIR/generated/minimal.standard.live.squashfs"
 GENERATED="$WORK_DIR/generated"
 
 rm -rf -- "$WORK_DIR"
@@ -193,16 +193,16 @@ customize_root "$STANDARD_ROOT"
 # dpkg-query expands these fields; the shell must pass them literally.
 # shellcheck disable=SC2016
 chroot "$STANDARD_ROOT" dpkg-query -W --showformat='${Package} ${Version}\n' \
-  | sort > "$GENERATED/omnios.manifest"
+  | sort > "$GENERATED/minimal.standard.manifest"
 du --summarize --block-size=1 "$STANDARD_ROOT" | awk '{print $1}' \
-  > "$GENERATED/omnios.size"
+  > "$GENERATED/minimal.standard.size"
 
 log 'Compressing the installable OmniOS filesystem'
-mksquashfs "$STANDARD_ROOT" "$OMNIOS_SQUASHFS" \
+mksquashfs "$STANDARD_ROOT" "$STANDARD_SQUASHFS" \
   -noappend -comp xz -b 1M -Xdict-size 100% -processors "$processors"
 
 log 'Composing the OmniOS live environment'
-mount_track -t squashfs -o loop,ro "$OMNIOS_SQUASHFS" "$OMNIOS_MOUNT"
+mount_track -t squashfs -o loop,ro "$STANDARD_SQUASHFS" "$OMNIOS_MOUNT"
 unsquashfs -no-progress -d "$LIVE_UPPER" "$ISO_MOUNT/casper/minimal.standard.live.squashfs"
 mount_track -t overlay overlay \
   -o "lowerdir=$OMNIOS_MOUNT,upperdir=$LIVE_UPPER,workdir=$LIVE_WORK,index=off" \
@@ -211,15 +211,15 @@ customize_root "$LIVE_ROOT"
 # dpkg-query expands these fields; the shell must pass them literally.
 # shellcheck disable=SC2016
 chroot "$LIVE_ROOT" dpkg-query -W --showformat='${Package} ${Version}\n' \
-  | sort > "$GENERATED/omnios.live.manifest"
+  | sort > "$GENERATED/minimal.standard.live.manifest"
 du --summarize --block-size=1 "$LIVE_ROOT" | awk '{print $1}' \
-  > "$GENERATED/omnios.live.size"
+  > "$GENERATED/minimal.standard.live.size"
 
 log 'Compressing the OmniOS live layer'
-mksquashfs "$LIVE_UPPER" "$OMNIOS_LIVE_SQUASHFS" \
+mksquashfs "$LIVE_UPPER" "$LIVE_SQUASHFS" \
   -noappend -comp xz -b 1M -Xdict-size 100% -processors "$processors"
 
-install_size="$(cat "$GENERATED/omnios.size")"
+install_size="$(cat "$GENERATED/minimal.standard.size")"
 cat > "$GENERATED/install-sources.yaml" <<EOF
 - default: true
   description:
@@ -228,42 +228,40 @@ cat > "$GENERATED/install-sources.yaml" <<EOF
   locale_support: locale-only
   name:
     en: OmniOS Desktop
-  path: omnios.squashfs
+  path: minimal.standard.squashfs
   size: $install_size
-  type: fsimage
+  type: fsimage-layered
   variant: desktop
 EOF
 
-sed \
-  -e 's/Ubuntu/OmniOS/g' \
-  -e 's/minimal\.standard\.live\.squashfs/omnios.live.squashfs/g' \
+sed 's/Ubuntu/OmniOS/g' \
   "$ISO_MOUNT/boot/grub/grub.cfg" > "$GENERATED/grub.cfg"
 if [[ -f "$ISO_MOUNT/boot/grub/loopback.cfg" ]]; then
-  sed \
-    -e 's/Ubuntu/OmniOS/g' \
-    -e 's/minimal\.standard\.live\.squashfs/omnios.live.squashfs/g' \
+  sed 's/Ubuntu/OmniOS/g' \
     "$ISO_MOUNT/boot/grub/loopback.cfg" > "$GENERATED/loopback.cfg"
 fi
 printf 'OmniOS 1.0 amd64\n' > "$GENERATED/disk-info"
 
-# Rebuild the per-casper SHA-256 index. Unchanged files are hashed directly
-# from the mounted source; all old minimal.* layers are intentionally omitted.
+# Rebuild the per-casper SHA-256 index. Preserve every untouched Ubuntu layer
+# and omit only the files that are replaced below under their original names.
 : > "$GENERATED/casper-SHA256SUMS"
 while IFS= read -r -d '' file; do
   name="$(basename -- "$file")"
   case "$name" in
-    minimal*|filesystem.manifest|filesystem.size|install-sources.yaml|SHA256SUMS|SHA256SUMS.gpg) continue ;;
+    minimal.standard.squashfs|minimal.standard.manifest|minimal.standard.size) continue ;;
+    minimal.standard.live.squashfs|minimal.standard.live.manifest|minimal.standard.live.size) continue ;;
+    filesystem.manifest|filesystem.size|install-sources.yaml|SHA256SUMS|SHA256SUMS.gpg) continue ;;
   esac
   hash="$(sha256sum "$file" | awk '{print $1}')"
   printf '%s *%s\n' "$hash" "$name" >> "$GENERATED/casper-SHA256SUMS"
 done < <(find "$ISO_MOUNT/casper" -maxdepth 1 -type f -print0)
-for name in omnios.squashfs omnios.live.squashfs omnios.manifest omnios.live.manifest omnios.size omnios.live.size; do
+for name in minimal.standard.squashfs minimal.standard.live.squashfs minimal.standard.manifest minimal.standard.live.manifest minimal.standard.size minimal.standard.live.size; do
   hash="$(sha256sum "$GENERATED/$name" | awk '{print $1}')"
   printf '%s *%s\n' "$hash" "$name" >> "$GENERATED/casper-SHA256SUMS"
 done
 for pair in \
-  "$GENERATED/omnios.live.manifest:filesystem.manifest" \
-  "$GENERATED/omnios.live.size:filesystem.size" \
+  "$GENERATED/minimal.standard.live.manifest:filesystem.manifest" \
+  "$GENERATED/minimal.standard.live.size:filesystem.size" \
   "$GENERATED/install-sources.yaml:install-sources.yaml"; do
   file="${pair%%:*}"
   name="${pair#*:}"
@@ -278,7 +276,7 @@ awk '
     path = $2
     sub(/^\*/, "", path)
     sub(/^\.\//, "", path)
-    if (path ~ /^casper\/minimal/) next
+    if (path ~ /^casper\/minimal\.standard(\.live)?\.(squashfs|manifest|size)$/) next
     if (path ~ /^casper\/(filesystem\.(manifest|size)|install-sources\.yaml|SHA256SUMS(\.gpg)?)$/) next
     if (path == "boot/grub/grub.cfg" || path == "boot/grub/loopback.cfg") next
     if (path == ".disk/info") next
@@ -293,14 +291,14 @@ append_md5() {
   hash="$(md5sum "$file" | awk '{print $1}')"
   printf '%s  ./%s\n' "$hash" "$iso_path" >> "$GENERATED/md5sum.txt"
 }
-append_md5 "$OMNIOS_SQUASHFS" casper/omnios.squashfs
-append_md5 "$OMNIOS_LIVE_SQUASHFS" casper/omnios.live.squashfs
-append_md5 "$GENERATED/omnios.manifest" casper/omnios.manifest
-append_md5 "$GENERATED/omnios.live.manifest" casper/omnios.live.manifest
-append_md5 "$GENERATED/omnios.size" casper/omnios.size
-append_md5 "$GENERATED/omnios.live.size" casper/omnios.live.size
-append_md5 "$GENERATED/omnios.live.manifest" casper/filesystem.manifest
-append_md5 "$GENERATED/omnios.live.size" casper/filesystem.size
+append_md5 "$STANDARD_SQUASHFS" casper/minimal.standard.squashfs
+append_md5 "$LIVE_SQUASHFS" casper/minimal.standard.live.squashfs
+append_md5 "$GENERATED/minimal.standard.manifest" casper/minimal.standard.manifest
+append_md5 "$GENERATED/minimal.standard.live.manifest" casper/minimal.standard.live.manifest
+append_md5 "$GENERATED/minimal.standard.size" casper/minimal.standard.size
+append_md5 "$GENERATED/minimal.standard.live.size" casper/minimal.standard.live.size
+append_md5 "$GENERATED/minimal.standard.live.manifest" casper/filesystem.manifest
+append_md5 "$GENERATED/minimal.standard.live.size" casper/filesystem.size
 append_md5 "$GENERATED/install-sources.yaml" casper/install-sources.yaml
 append_md5 "$GENERATED/casper-SHA256SUMS" casper/SHA256SUMS
 append_md5 "$GENERATED/grub.cfg" boot/grub/grub.cfg
@@ -314,22 +312,16 @@ xorriso_args=(
   -indev "$SOURCE_ISO"
   -outdev "$OUTPUT_ISO"
   -overwrite on
-)
-while IFS= read -r -d '' file; do
-  # -rm accepts a variable-length path list. The -- delimiter prevents it from
-  # consuming the next xorriso command as another path.
-  xorriso_args+=( -rm "/casper/$(basename -- "$file")" -- )
-done < <(find "$ISO_MOUNT/casper" -maxdepth 1 -type f -name 'minimal*' -print0)
-xorriso_args+=(
+  # Keep Casper's original layer names and replace their contents in place.
   -rm /casper/SHA256SUMS.gpg --
-  -map "$OMNIOS_SQUASHFS" /casper/omnios.squashfs
-  -map "$OMNIOS_LIVE_SQUASHFS" /casper/omnios.live.squashfs
-  -map "$GENERATED/omnios.manifest" /casper/omnios.manifest
-  -map "$GENERATED/omnios.live.manifest" /casper/omnios.live.manifest
-  -map "$GENERATED/omnios.size" /casper/omnios.size
-  -map "$GENERATED/omnios.live.size" /casper/omnios.live.size
-  -map "$GENERATED/omnios.live.manifest" /casper/filesystem.manifest
-  -map "$GENERATED/omnios.live.size" /casper/filesystem.size
+  -map "$STANDARD_SQUASHFS" /casper/minimal.standard.squashfs
+  -map "$LIVE_SQUASHFS" /casper/minimal.standard.live.squashfs
+  -map "$GENERATED/minimal.standard.manifest" /casper/minimal.standard.manifest
+  -map "$GENERATED/minimal.standard.live.manifest" /casper/minimal.standard.live.manifest
+  -map "$GENERATED/minimal.standard.size" /casper/minimal.standard.size
+  -map "$GENERATED/minimal.standard.live.size" /casper/minimal.standard.live.size
+  -map "$GENERATED/minimal.standard.live.manifest" /casper/filesystem.manifest
+  -map "$GENERATED/minimal.standard.live.size" /casper/filesystem.size
   -map "$GENERATED/install-sources.yaml" /casper/install-sources.yaml
   -map "$GENERATED/casper-SHA256SUMS" /casper/SHA256SUMS
   -map "$GENERATED/grub.cfg" /boot/grub/grub.cfg
@@ -349,10 +341,10 @@ xorriso "${xorriso_args[@]}"
 
 log 'Validating the generated ISO structure and boot records'
 xorriso -indev "$OUTPUT_ISO" -report_el_torito plain >/dev/null
-xorriso -indev "$OUTPUT_ISO" -find /casper/omnios.squashfs -exec report_lba -- \
-  | grep -q 'omnios.squashfs' || fail 'generated ISO does not contain the install filesystem'
-xorriso -indev "$OUTPUT_ISO" -find /casper/omnios.live.squashfs -exec report_lba -- \
-  | grep -q 'omnios.live.squashfs' || fail 'generated ISO does not contain the live layer'
+xorriso -indev "$OUTPUT_ISO" -find /casper/minimal.standard.squashfs -exec report_lba -- \
+  | grep -q 'minimal.standard.squashfs' || fail 'generated ISO does not contain the install filesystem'
+xorriso -indev "$OUTPUT_ISO" -find /casper/minimal.standard.live.squashfs -exec report_lba -- \
+  | grep -q 'minimal.standard.live.squashfs' || fail 'generated ISO does not contain the live layer'
 (
   cd "$(dirname -- "$OUTPUT_ISO")"
   sha256sum "$(basename -- "$OUTPUT_ISO")" > "$(basename -- "$OUTPUT_ISO").sha256"

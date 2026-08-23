@@ -86,7 +86,7 @@ timeout --signal=TERM --kill-after=30 "$BOOT_TIMEOUT" \
     -m "$BOOT_MEMORY" \
     -kernel "$TEST_DIR/vmlinuz" \
     -initrd "$TEST_DIR/initrd" \
-    -append 'boot=casper layerfs-path=omnios.live.squashfs noprompt noeject hostname=omnios username=omnios console=tty0 console=ttyS0,115200n8 systemd.unit=multi-user.target systemd.show_status=1 rd.systemd.show_status=1 loglevel=6' \
+    -append 'boot=casper layerfs-path=minimal.standard.live.squashfs noprompt noeject hostname=omnios username=omnios console=tty0 console=ttyS0,115200n8 systemd.unit=multi-user.target systemd.show_status=1 rd.systemd.show_status=1 loglevel=6' \
     -drive "file=$ISO_PATH,media=cdrom,readonly=on,format=raw" \
     -device virtio-rng-pci \
     -nic none \
