@@ -7,7 +7,7 @@ command -v docker >/dev/null 2>&1 || {
     exit 1
 }
 
-mkdir -p "$ROOT/build/cache" "$ROOT/out"
+mkdir -p "$ROOT/build/downloads" "$ROOT/out"
 exec docker run --rm --privileged \
     --volume "$ROOT:/workspace" \
     --workdir /workspace \

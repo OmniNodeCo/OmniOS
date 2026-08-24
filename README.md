@@ -60,7 +60,7 @@ out/OmniOS-1.0-amd64.packages
 out/OmniOS-1.0-amd64.iso-info.txt
 ```
 
-The Debian package download cache is retained under `build/cache/`. Do not use `scripts/build.sh clean --purge-cache` unless the cache itself is damaged.
+The Debian package download cache is retained under `build/downloads/`. Do not use `scripts/build.sh clean --purge-cache` unless the cache itself is damaged.
 
 ## Flash and boot
 

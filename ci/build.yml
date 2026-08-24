@@ -58,7 +58,7 @@ jobs:
       - name: Restore Debian package cache
         uses: actions/cache@v5
         with:
-          path: build/cache
+          path: build/downloads
           key: omnios-debian13-${{ hashFiles('auto/**', 'config/package-lists/**', 'config/hooks/**') }}
           restore-keys: omnios-debian13-
 

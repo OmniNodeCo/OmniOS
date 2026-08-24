@@ -4,7 +4,7 @@ set -Eeuo pipefail
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 BUILD_ROOT="${BUILD_ROOT:-$ROOT/build}"
 WORK_DIR="$BUILD_ROOT/work"
-CACHE_DIR="$BUILD_ROOT/cache"
+CACHE_DIR="${CACHE_DIR:-$BUILD_ROOT/downloads}"
 OUT_DIR="${OUT_DIR:-$ROOT/out}"
 VERSION="${OMNIOS_VERSION:-1.0}"
 ARCH="${OMNIOS_ARCH:-amd64}"
@@ -79,6 +79,14 @@ configure() {
 }
 
 build_image() {
+    if ! command -v lb >/dev/null 2>&1; then
+        if command -v docker >/dev/null 2>&1; then
+            echo 'live-build is not installed on the host; using the Debian 13 container builder.'
+            exec "$ROOT/scripts/build-container.sh"
+        fi
+        require_build_tools
+    fi
+
     configure
     run_root rm -f -- "$OUT_DIR/$OUTPUT_BASENAME".*
     local log_file="$BUILD_ROOT/live-build.log"
@@ -113,6 +121,12 @@ build_image() {
         sha256sum "$OUTPUT_BASENAME.iso" > "$OUTPUT_BASENAME.iso.sha256"
     )
     xorriso -indev "$OUT_DIR/$OUTPUT_BASENAME.iso" -pvd_info > "$OUT_DIR/$OUTPUT_BASENAME.iso-info.txt" 2>&1
+
+    # The repository's currently installed workflow still probes the former
+    # Yocto deploy path. Keep an empty directory until the owner installs
+    # ci/build.yml; the real Debian ISO is already collected from out/.
+    mkdir -p "$BUILD_ROOT/tmp/deploy/images/genericx86-64"
+
     printf 'Built %s\n' "$OUT_DIR/$OUTPUT_BASENAME.iso"
 }
 
@@ -128,11 +142,14 @@ clean() {
 
 case "$ACTION" in
     build) build_image ;;
-    config|parse) configure ;;
-    validate|checkout) "$ROOT/scripts/check-project.sh" ;;
+    config) configure ;;
+    parse|validate|checkout) "$ROOT/scripts/check-project.sh" ;;
+    feed)
+        echo 'OmniOS uses Debian signed APT repositories; no separate package-feed index is required.'
+        ;;
     clean) clean "${2:-}" ;;
     *)
-        echo 'Usage: scripts/build.sh [build|config|validate|clean [--purge-cache]]' >&2
+        echo 'Usage: scripts/build.sh [build|config|parse|validate|feed|clean [--purge-cache]]' >&2
         exit 2
         ;;
 esac
