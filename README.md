@@ -54,6 +54,12 @@ Artifacts are written under `build/tmp/deploy/images/genericx86-64/`, including:
 
 Build downloads and state remain ignored under `build/`. OmniOS accepts OE-Core's `commercial` flag for FFmpeg; distributors remain responsible for codec patent and regional compliance.
 
+On GitHub Actions, `scripts/build.sh` temporarily enables unprivileged user namespaces on the ephemeral Ubuntu 24.04 runner because BitBake requires them and Noble restricts them through AppArmor by default. If a local Ubuntu 24.04 build reports the same error, enable the setting for that build host with:
+
+```bash
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+```
+
 ## Flash and boot
 
 **Flashing destroys the selected device. Verify its path carefully.**
