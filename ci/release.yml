@@ -1,14 +1,14 @@
-name: Release OmniOS Image
+name: Release OmniOS ISO
 
 on:
   workflow_dispatch:
     inputs:
       build_run_id:
-        description: Successful production-signed Build OmniOS workflow run ID
+        description: Successful Build OmniOS ISO workflow run ID
         required: true
         type: string
       tag:
-        description: Release tag matching the bundle version (for example v1.0.7)
+        description: Release tag matching the build revision (for example v1.0.7)
         required: true
         type: string
       prerelease:
@@ -46,50 +46,37 @@ jobs:
           RUN_ID: ${{ inputs.build_run_id }}
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || {
-            echo "build_run_id must contain digits only" >&2
-            exit 1
-          }
-          [[ "$RELEASE_TAG" =~ ^v1\.0\.([0-9]+)$ ]] || {
-            echo "tag must use the v1.0.REVISION format" >&2
-            exit 1
-          }
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "build_run_id must contain digits only" >&2; exit 1; }
+          [[ "$RELEASE_TAG" =~ ^v1\.0\.([0-9]+)$ ]] || { echo "tag must use v1.0.REVISION" >&2; exit 1; }
           tag_revision="${BASH_REMATCH[1]}"
 
           run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
-          conclusion="$(jq -r '.conclusion' <<<"$run_json")"
-          workflow_name="$(jq -r '.name' <<<"$run_json")"
+          [[ "$(jq -r '.conclusion' <<<"$run_json")" == success ]] || { echo "Build did not succeed" >&2; exit 1; }
+          [[ "$(jq -r '.name' <<<"$run_json")" == "Build OmniOS ISO" ]] || { echo "Unexpected source workflow" >&2; exit 1; }
           source_sha="$(jq -r '.head_sha' <<<"$run_json")"
           source_branch="$(jq -r '.head_branch' <<<"$run_json")"
           source_repository="$(jq -r '.head_repository.full_name' <<<"$run_json")"
           default_branch="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.default_branch')"
-
-          [[ "$conclusion" == success ]] || { echo "Build run did not succeed" >&2; exit 1; }
-          [[ "$workflow_name" == "Build OmniOS Yocto Image" ]] || { echo "Unexpected source workflow: $workflow_name" >&2; exit 1; }
           [[ "$source_repository" == "$GITHUB_REPOSITORY" ]] || { echo "Cross-repository artifacts are forbidden" >&2; exit 1; }
-          [[ "$source_branch" == "$default_branch" ]] || {
-            echo "Releases must come from the default branch ($default_branch), not $source_branch" >&2
-            exit 1
-          }
+          [[ "$source_branch" == "$default_branch" ]] || { echo "Release must come from $default_branch" >&2; exit 1; }
           [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid source commit" >&2; exit 1; }
           if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
             echo "Tag already exists: $RELEASE_TAG" >&2
             exit 1
           fi
-
           echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
-          echo "revision=$tag_revision" >> "$GITHUB_OUTPUT"
           echo "branch=$source_branch" >> "$GITHUB_OUTPUT"
+          echo "revision=$tag_revision" >> "$GITHUB_OUTPUT"
 
-      - name: Download build artifacts
+      - name: Download build artifact
         uses: actions/download-artifact@v5
         with:
-          name: OmniOS-1.0-x86_64
+          name: OmniOS-1.0-amd64
           path: release
           run-id: ${{ inputs.build_run_id }}
           github-token: ${{ github.token }}
 
-      - name: Verify production artifact
+      - name: Verify ISO and metadata
         env:
           EXPECTED_SHA: ${{ steps.source.outputs.sha }}
           EXPECTED_REVISION: ${{ steps.source.outputs.revision }}
@@ -97,40 +84,23 @@ jobs:
         run: |
           cd release
           sha256sum --check SHA256SUMS
-
-          [[ "$(tr -d '\r\n' < SIGNING-PROFILE)" == production ]] || {
-            echo "Refusing to release an artifact signed with development keys" >&2
-            exit 1
-          }
-
+          sha256sum --check OmniOS-1.0-amd64.iso.sha256
           metadata_value() {
             awk -F= -v key="$1" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' RELEASE-METADATA
           }
           [[ "$(metadata_value source_commit)" == "$EXPECTED_SHA" ]] || { echo "Source commit mismatch" >&2; exit 1; }
-          [[ "$(metadata_value workflow_run_id)" == "$EXPECTED_RUN_ID" ]] || { echo "Workflow run mismatch" >&2; exit 1; }
-          [[ "$(metadata_value release_revision)" == "$EXPECTED_REVISION" ]] || { echo "Release revision mismatch" >&2; exit 1; }
-          [[ "$(metadata_value bundle_version)" == "1.0.$EXPECTED_REVISION" ]] || { echo "Bundle version mismatch" >&2; exit 1; }
-
-          compgen -G 'omnios-plasma-image*.wic.zst' >/dev/null
-          compgen -G 'omnios-plasma-image*.wic.bmap' >/dev/null
-          compgen -G 'omnios-update-bundle*.raucb' >/dev/null
-          openssl x509 -in RAUC-RELEASE-CERT.pem -noout -checkend 2592000
-          openssl verify -CAfile RAUC-KEYRING.pem RAUC-RELEASE-CERT.pem
+          [[ "$(metadata_value workflow_run_id)" == "$EXPECTED_RUN_ID" ]] || { echo "Run ID mismatch" >&2; exit 1; }
+          [[ "$(metadata_value release_revision)" == "$EXPECTED_REVISION" ]] || { echo "Revision mismatch" >&2; exit 1; }
+          [[ "$(metadata_value version)" == "1.0.$EXPECTED_REVISION" ]] || { echo "Version mismatch" >&2; exit 1; }
+          test -s OmniOS-1.0-amd64.iso
 
       - name: Prepare public release files
         run: |
           mkdir -p publish
           find release -maxdepth 1 -type f \
-            \( -name 'omnios-plasma-image*.wic.zst' \
-            -o -name 'omnios-plasma-image*.wic.bmap' \
-            -o -name 'omnios-plasma-image*.manifest' \
-            -o -name 'omnios-update-bundle*.raucb' \
-            -o -name 'bzImage*' \
-            -o -name 'RAUC-KEYRING.pem' \
-            -o -name 'RAUC-RELEASE-CERT.pem' \
-            -o -name 'RELEASE-METADATA' \
-            -o -name 'SIGNING-PROFILE' \) \
-            -exec cp {} publish/ \;
+            \( -name 'OmniOS-*.iso' -o -name 'OmniOS-*.iso.sha256' \
+            -o -name 'OmniOS-*.packages' -o -name 'OmniOS-*.iso-info.txt' \
+            -o -name 'RELEASE-METADATA' \) -exec cp {} publish/ \;
           (cd publish && sha256sum * > SHA256SUMS)
           ls -lh publish
 
@@ -149,17 +119,16 @@ jobs:
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           cat > release-notes.md <<EOF
-          OmniOS ${RELEASE_TAG#v} for generic x86-64 PCs.
+          OmniOS ${RELEASE_TAG#v} is a Debian 13-based KDE Plasma live and installation ISO for x86-64 PCs.
 
           - Source commit: \`$SOURCE_SHA\`
           - Source branch: \`$SOURCE_BRANCH\`
-          - Build workflow run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID
-          - Update format: signed RAUC verity bundle with A/B rollback
-          - Disk image: compressed hybrid BIOS/UEFI WIC image
+          - Build run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID
+          - Boot support: legacy BIOS and UEFI
+          - Installer: Calamares
 
-          Verify downloaded files with \`SHA256SUMS\` and the GitHub artifact attestations before flashing.
+          Verify downloads using \`SHA256SUMS\` and GitHub artifact attestations before flashing.
           EOF
-
           release_flags=()
           [[ "$PRERELEASE" == true ]] && release_flags+=(--prerelease)
           gh release create "$RELEASE_TAG" publish/* \

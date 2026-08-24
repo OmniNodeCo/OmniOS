@@ -1,0 +1,59 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+# Preserve OmniOS identity across future base-files upgrades. Debian's original
+# os-release remains available at /usr/lib/os-release.debian.
+if ! dpkg-divert --list /usr/lib/os-release | grep -q /usr/lib/os-release; then
+    dpkg-divert --local --add --rename \
+        --divert /usr/lib/os-release.debian /usr/lib/os-release
+fi
+install -m 0644 /usr/share/omnios/identity/os-release /usr/lib/os-release
+install -m 0644 /usr/share/omnios/identity/omnios-release /etc/omnios-release
+install -m 0644 /usr/share/omnios/identity/issue /etc/issue
+install -m 0644 /usr/share/omnios/identity/motd /etc/motd
+install -m 0644 /usr/share/omnios/identity/lsb-release /etc/lsb-release
+ln -sfn ../usr/lib/os-release /etc/os-release
+printf 'omnios\n' > /etc/hostname
+if [[ -f /etc/hosts ]] && ! grep -qE '^127\.0\.1\.1[[:space:]]+omnios' /etc/hosts; then
+    printf '127.0.1.1 omnios\n' >> /etc/hosts
+fi
+
+# Apply OmniOS branding on top of Debian's maintained Calamares integration.
+install -d /etc/calamares/branding/omnios
+cp -a /usr/share/omnios/calamares/branding/omnios/. /etc/calamares/branding/omnios/
+cp /usr/share/omnios/calamares/partition.conf /etc/calamares/modules/partition.conf
+install -m 0755 /usr/share/omnios/calamares/calamares-sources-final \
+    /usr/share/calamares/helpers/calamares-sources-final
+sed -i 's/^branding:[[:space:]].*/branding: omnios/' /etc/calamares/settings.conf
+
+# Keep Debian's tested launcher, but present it as the OmniOS installer.
+if [[ -f /usr/share/applications/calamares-install-debian.desktop ]]; then
+    sed -i \
+        -e 's/^Name=.*/Name=Install OmniOS/' \
+        -e 's/^GenericName=.*/GenericName=System Installer/' \
+        -e 's/^Comment=.*/Comment=Install OmniOS on this computer/' \
+        -e 's/^Icon=.*/Icon=install-omnios/' \
+        /usr/share/applications/calamares-install-debian.desktop
+fi
+if [[ -f /etc/xdg/autostart/calamares-desktop-icon.desktop ]]; then
+    printf '\nHidden=true\n' >> /etc/xdg/autostart/calamares-desktop-icon.desktop
+fi
+
+install -d /etc/default/grub.d
+cat > /etc/default/grub.d/10-omnios.cfg <<'GRUB'
+GRUB_DISTRIBUTOR="OmniOS"
+GRUB_TIMEOUT_STYLE=menu
+GRUB_TIMEOUT=5
+GRUB_DISABLE_RECOVERY=false
+GRUB
+
+systemctl enable omnios-firstboot.service
+systemctl enable NetworkManager.service
+systemctl enable firewalld.service
+systemctl enable unattended-upgrades.service
+
+# Do not clone the build system's identity into every installation.
+truncate -s 0 /etc/machine-id
+rm -f /var/lib/dbus/machine-id
+apt-get clean
+rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*

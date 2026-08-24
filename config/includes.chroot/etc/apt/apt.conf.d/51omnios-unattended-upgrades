@@ -1,0 +1,8 @@
+Unattended-Upgrade::Origins-Pattern {
+    "origin=Debian,codename=trixie,label=Debian";
+    "origin=Debian,codename=trixie-updates,label=Debian";
+    "origin=Debian,codename=trixie-security,label=Debian-Security";
+};
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+Unattended-Upgrade::Automatic-Reboot "false";

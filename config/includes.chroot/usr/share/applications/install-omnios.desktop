@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Install OmniOS
+GenericName=System Installer
+Comment=Install OmniOS on this computer
+Exec=calamares-install-debian
+Icon=install-omnios
+Terminal=false
+Categories=Qt;System;
+StartupNotify=true
+Keywords=installer;calamares;system;

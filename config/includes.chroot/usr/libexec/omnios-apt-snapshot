@@ -1,0 +1,34 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+STATE=/run/omnios-apt-snapshot
+[[ "$(findmnt --noheadings --output FSTYPE / 2>/dev/null || true)" == btrfs ]] || exit 0
+snapper --config root get-config >/dev/null 2>&1 || exit 0
+
+case "${1:-}" in
+    pre)
+        if [[ ! -e "$STATE" ]]; then
+            umask 077
+            snapper --config root create \
+                --type pre \
+                --cleanup-algorithm number \
+                --description "Before APT transaction" \
+                --print-number > "$STATE"
+        fi
+        ;;
+    post)
+        if [[ -s "$STATE" ]]; then
+            pre_number="$(cat "$STATE")"
+            snapper --config root create \
+                --type post \
+                --pre-number "$pre_number" \
+                --cleanup-algorithm number \
+                --description "After APT transaction"
+            rm -f "$STATE"
+        fi
+        ;;
+    *)
+        echo "Usage: omnios-apt-snapshot {pre|post}" >&2
+        exit 2
+        ;;
+esac

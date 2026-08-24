@@ -1,0 +1,4 @@
+OmniOS 1.0 (Origin)
+BASE=Debian 13 (trixie)
+ARCHITECTURE=amd64
+DESKTOP=KDE Plasma

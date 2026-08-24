@@ -1,144 +1,142 @@
 # OmniOS
 
-OmniOS is an independent Linux operating system built with OpenEmbedded and the Yocto Project. It is **not** an Ubuntu remaster or ISO-customization wrapper.
+OmniOS is a normal, installable KDE Plasma desktop operating system based on **Debian 13 Stable (trixie)**. It is built as a hybrid live ISO for 64-bit PCs and is not an Ubuntu remaster, Yocto appliance image, or development-only environment.
 
-The first target is a general-purpose **64-bit x86 PC** (`genericx86-64`) with KDE Plasma. Future ARM64, x86-32, and board targets will have separate machine configurations and release images rather than one unreliable “universal” image.
-
-> **Development status:** the reproducible build metadata, desktop image, hybrid boot layout, branding, and signed A/B update path are implemented. Hardware qualification and production signing remain release-engineering responsibilities.
+The live session and installed system use the same package set. Users can try the desktop from USB and install it with the Calamares graphical installer.
 
 ## Included system
 
-- KDE Plasma 6 with Wayland and X11 compatibility, SDDM, and OmniOS branding
-- NetworkManager, Wi-Fi, Ethernet, IPv6, Bluetooth, firewalld, and nftables
-- PipeWire/WirePlumber audio
-- Mesa OpenGL/Vulkan and common Intel, AMD, Nouveau, and virtual GPU drivers
-- Common Ethernet/Wi-Fi, USB, input, webcam, SATA, NVMe, filesystems, encryption, TPM, and virtualization support
-- The generic x86 BSP's complete `linux-firmware` recommendation
-- RPM/DNF package management
-- Hybrid GRUB boot for UEFI and legacy BIOS
-- Signed RAUC A/B system updates with trial boot and rollback
+- KDE Plasma desktop with Wayland and X11 support
+- Calamares graphical installer
+- Legacy BIOS and UEFI boot
+- Debian's stable kernel, microcode, and broad PC firmware collection
+- NetworkManager, Wi-Fi, VPN, WireGuard, Bluetooth, and firewalld
+- PipeWire and WirePlumber audio
+- Firefox ESR, LibreOffice, VLC, KDE Connect, and Flatpak
+- Discover software management with Flatpak integration
+- Printing and common storage/filesystem tools
+- Automatic signed Debian security updates
+- Optional Btrfs root filesystem with Snapper snapshots and Btrfs Assistant
 
-The release artifact is a directly flashable compressed GPT disk image (`.wic.zst`) plus `.wic.bmap`, not a live ISO. The fixed A/B layout requires at least a 40 GiB target drive. A signed `.raucb` bundle is produced from the same root filesystem.
+The first release architecture is **amd64/x86-64**. ARM64 and other architectures require separate future images.
 
-## Reproducible source baseline
+## Update and rollback policy
 
-[`kas/omnios-x86_64.yml`](kas/omnios-x86_64.yml) pins full commits for Yocto Project 6.0.2 LTS (Wrynose), BitBake, OE-Core, meta-yocto, meta-openembedded, Qt 6.10, KDE Frameworks/Plasma, and RAUC. Yocto produces package, license, build-history, and SPDX metadata.
+OmniOS uses Debian's APT repositories and their cryptographic signatures. `unattended-upgrades` installs Debian 13 security updates automatically and never reboots without the user's permission.
 
-## Build
+When the system is installed on Btrfs—the Calamares default—OmniOS initializes Snapper and creates paired snapshots around APT/DPKG transactions. Btrfs Assistant provides a graphical view of snapshots. A damaged installation can be recovered from a prior snapshot using the OmniOS live ISO and standard Snapper/Btrfs tools.
 
-Use a recent Linux host with at least 16 GiB RAM, 4 CPU cores, and approximately 150 GiB free disk:
+This preserves normal Debian package management while providing practical recovery. It deliberately avoids unsigned package-download scripts.
+
+## Build requirements
+
+The recommended build runs inside a privileged Debian 13 container so the host distribution does not affect live-build:
+
+- Linux host with Docker
+- 4 or more CPU cores
+- 8 GiB RAM or more
+- Approximately 30 GiB free disk
+
+Build the ISO:
+
+```bash
+scripts/check-project.sh
+scripts/build-container.sh
+```
+
+On a Debian 13 build host, it can also be built directly:
 
 ```bash
 scripts/bootstrap-host.sh
-source .venv/bin/activate
-scripts/generate-rauc-keys.sh   # local development key only
 scripts/build.sh build
 ```
 
-Useful commands:
+Output:
 
-```bash
-scripts/build.sh checkout
-scripts/build.sh parse
-scripts/build.sh feed
-scripts/build.sh shell
-scripts/build.sh clean
-scripts/check-layer.sh
+```text
+out/OmniOS-1.0-amd64.iso
+out/OmniOS-1.0-amd64.iso.sha256
+out/OmniOS-1.0-amd64.packages
+out/OmniOS-1.0-amd64.iso-info.txt
 ```
 
-Artifacts are written under `build/tmp/deploy/images/genericx86-64/`, including:
-
-- `omnios-plasma-image-genericx86-64.wic.zst`
-- `omnios-plasma-image-genericx86-64.wic.bmap`
-- `omnios-update-bundle-genericx86-64.raucb`
-
-Build downloads and state remain ignored under `build/`. OmniOS accepts OE-Core's `commercial` flag for FFmpeg; distributors remain responsible for codec patent and regional compliance.
-
-On GitHub Actions, `scripts/build.sh` temporarily enables unprivileged user namespaces on the ephemeral Ubuntu 24.04 runner because BitBake requires them and Noble restricts them through AppArmor by default. If a local Ubuntu 24.04 build reports the same error, enable the setting for that build host with:
-
-```bash
-sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-```
+The Debian package download cache is retained under `build/cache/`. Do not use `scripts/build.sh clean --purge-cache` unless the cache itself is damaged.
 
 ## Flash and boot
 
 **Flashing destroys the selected device. Verify its path carefully.**
 
 ```bash
-sudo bmaptool copy build/tmp/deploy/images/genericx86-64/omnios-plasma-image-genericx86-64.wic.zst /dev/sdX
+sudo dd if=out/OmniOS-1.0-amd64.iso of=/dev/sdX \
+  bs=16M oflag=direct status=progress conv=fsync
 ```
 
-Or:
+The image can also be written using KDE ISO Image Writer, GNOME Disks, Rufus, or Etcher.
+
+The live session automatically logs in as `omnios`. During installation, Calamares asks for the permanent username, password, timezone, keyboard layout, disk layout, and encryption choices. There is no preconfigured account in the installed system.
+
+## QEMU testing
+
+Interactive legacy BIOS boot:
 
 ```bash
-zstd -dc path/to/image.wic.zst | sudo dd of=/dev/sdX bs=16M oflag=direct status=progress conv=fsync
+scripts/run-qemu.sh
 ```
 
-The development image automatically logs in as `omnios`; its initial password is `omnios`. Replace the password hash and disable SDDM autologin in a private production layer before distribution.
-
-QEMU testing:
+Interactive UEFI boot:
 
 ```bash
-scripts/run-qemu.sh                    # legacy BIOS
-QEMU_UEFI=1 scripts/run-qemu.sh        # UEFI with OVMF
+QEMU_UEFI=1 scripts/run-qemu.sh
 ```
 
-## Atomic updates and rollback
-
-The GPT disk has hybrid boot, a writable GRUB environment, root slots A/B, and persistent data. `/home`, a persistent `/etc` overlay, update state, and RAUC status survive slot changes.
-
-RAUC `verity` bundles are signed. The disabled-by-default update timer downloads only over HTTPS, limits download size, verifies the complete bundle against the image trust anchor, rejects bundles below the embedded semantic-version floor, and writes only the inactive root slot. GRUB gives a new slot one trial; `rauc-mark-good` confirms a healthy userspace boot. An unconfirmed slot is skipped at the next restart.
-
-To operate a feed:
-
-1. protect production signing keys as described in [`keys/README.md`](keys/README.md);
-2. increment `OMNIOS_RELEASE_REVISION` for every published build;
-3. publish the `.raucb` over HTTPS;
-4. set `BUNDLE_URL` and `ENABLED=1` in `/etc/omnios/update.conf`;
-5. choose whether `AUTO_REBOOT=1` is suitable;
-6. qualify installation, power-loss handling, trial confirmation, and rollback on real hardware.
-
-Manual installation uses the same verification path:
+Automated smoke tests:
 
 ```bash
-sudo rauc info OmniOS-update.raucb
-sudo rauc install OmniOS-update.raucb
-sudo systemctl reboot
+scripts/smoke-test.sh
+QEMU_UEFI=1 scripts/smoke-test.sh
 ```
 
-DNF feeds may supplement applications, but base OS releases use RAUC to avoid partial upgrades.
+## Customization layout
 
-## CI template
+```text
+auto/                           reproducible live-build configuration
+config/package-lists/           Debian desktop, firmware, and utility packages
+config/includes.chroot/         files placed in the live and installed system
+config/hooks/normal/            post-package configuration and cleanup
+scripts/build.sh                direct Debian live-build wrapper
+scripts/build-container.sh      recommended Debian 13 container build
+scripts/check-project.sh        static validation
+scripts/run-qemu.sh             interactive BIOS/UEFI test
+scripts/smoke-test.sh           automated boot validation
+ci/build.yml                    owner-installable build workflow
+ci/release.yml                  owner-installable release workflow
+```
 
-[`ci/build.yml`](ci/build.yml) and [`ci/release.yml`](ci/release.yml) are deliberately outside `.github/workflows/` so repository owners can review and install them:
+## CI workflows
+
+Workflow templates remain under `ci/` so repository owners can review and install them:
 
 ```bash
 cp ci/build.yml .github/workflows/build.yml
 cp ci/release.yml .github/workflows/release.yml
+git add .github/workflows
+git commit -m "ci: install Debian ISO workflows"
+git push
 ```
 
-The build workflow validates metadata, applies a monotonic release revision, builds the image and signed bundle, generates feed metadata, smoke-tests BIOS and UEFI boot, and uploads checksummed artifacts. Without secrets it uses development signing and marks the artifact accordingly. Production builds require these base64-encoded repository or environment secrets:
+The build workflow caches downloaded Debian packages, builds inside `debian:13-slim`, verifies the ISO checksum, tests BIOS and UEFI boot, and uploads the artifact. The release workflow verifies the source run and checksums, creates GitHub provenance attestations, and publishes the ISO.
 
-- `OMNIOS_RAUC_KEYRING_PEM_B64`
-- `OMNIOS_RAUC_CERT_PEM_B64`
-- `OMNIOS_RAUC_KEY_PEM_B64`
+## Release engineering
 
-Set `require_production_signing=true` for a releasable build. The release workflow accepts that successful build's run ID and a matching `v1.0.REVISION` tag, requires a default-branch source and production signing, verifies all checksums and metadata, creates provenance attestations, and publishes the GitHub release.
+Before a public release:
 
-## Layout
+1. build from the default branch with a monotonically increasing revision;
+2. pass BIOS and UEFI smoke tests;
+3. install on representative Intel and AMD hardware;
+4. test Wi-Fi, Bluetooth, sound, suspend/resume, graphics, and disk encryption;
+5. test a Btrfs snapshot and recovery procedure;
+6. publish the ISO checksum, package manifest, and provenance attestation.
 
-```text
-kas/                         pinned x86-64 manifest
-meta-omnios/conf/            distribution and layer policy
-meta-omnios/recipes-core/    image, branding, persistence, and updates
-meta-omnios/recipes-bsp/     hybrid GRUB A/B boot
-meta-omnios/recipes-kernel/  broad PC kernel policy
-meta-omnios/files/wic/       GPT A/B layout
-scripts/                     setup, validation, build, keys, and QEMU
-ci/                          owner-installable workflow template
-keys/                        production signing guidance
-```
+## Licensing
 
-## License
-
-Project-owned metadata and scripts are MIT licensed. Built images contain independently licensed software; consult generated license and SPDX manifests.
+Project scripts and configuration are MIT licensed. The OmniOS generated artwork in this repository is released under CC0-1.0. Debian packages retain their individual upstream licenses; the generated package manifest records the ISO composition.

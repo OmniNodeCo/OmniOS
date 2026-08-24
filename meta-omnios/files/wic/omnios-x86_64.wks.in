@@ -1,7 +1,0 @@
-# OmniOS x86-64 UEFI/BIOS A/B disk image
-part /boot --source bootimg_biosplusefi --sourceparams="loader=grub-efi" --ondisk sda --label OMNIOS-BOOT --part-name omnios-boot --active --align 4096 --fixed-size 512M
-part /grubenv --source rawcopy --sourceparams="file=omnios-grubenv.vfat" --ondisk sda --fstype=vfat --label OMNIOS-ENV --part-name omnios-grubenv --align 4096 --fixed-size 16M
-part / --source rawcopy --sourceparams="file=${IMGDEPLOYDIR}/omnios-plasma-image-genericx86-64.rootfs.ext4" --ondisk sda --fstype=ext4 --label omnios-root-a --part-name omnios-root-a --align 4096 --fixed-size 14336M
-part / --source empty --ondisk sda --fstype=ext4 --label omnios-root-b --part-name omnios-root-b --align 4096 --fixed-size 14336M
-part /data --source empty --ondisk sda --fstype=ext4 --label omnios-data --part-name omnios-data --align 4096 --fixed-size 8192M
-bootloader --ptable gpt --timeout=3 --append="rootwait rootfstype=ext4 console=ttyS0,115200 console=tty0 quiet"

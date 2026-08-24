@@ -1,5 +1,0 @@
-# Keep A/B system partitions out of desktop automounters.
-ENV{ID_PART_ENTRY_NAME}=="omnios-root-a", ENV{UDISKS_IGNORE}="1"
-ENV{ID_PART_ENTRY_NAME}=="omnios-root-b", ENV{UDISKS_IGNORE}="1"
-ENV{ID_PART_ENTRY_NAME}=="omnios-grubenv", ENV{UDISKS_IGNORE}="1"
-ENV{ID_PART_ENTRY_NAME}=="omnios-boot", ENV{UDISKS_IGNORE}="1"

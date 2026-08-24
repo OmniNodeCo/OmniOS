@@ -1,0 +1,12 @@
+[kdeglobals][KDE]
+LookAndFeelPackage=org.omnios.desktop
+
+[kdeglobals][General]
+ColorScheme=BreezeDark
+
+[plasmarc][Theme]
+name=breeze-dark
+
+[Wallpaper]
+Image=OmniOS
+WallpaperPlugin=org.kde.image

@@ -1,33 +1,24 @@
-# Yocto/Kas checkouts and build output
+# live-build workspace and package cache
 build/
-sources/
-downloads/
-sstate-cache/
+.cache/
 
-# Kas external repositories
-/bitbake/
-/openembedded-core/
-/meta-yocto/
-/meta-openembedded/
-/meta-qt6/
-/meta-rauc/
-/meta-kf6/
-/meta-kde/
-
-# Generated images, feeds, SDKs, and keys
+# Generated release files
 out/
-deploy/
-.keys/
-*.wic
-*.wic.*
-*.bmap
 *.iso
+*.hybrid.iso
+*.img
 *.qcow2
 *.vmdk
-*.raucb
+*.zsync
+*.sha256
+*.packages
 
-# Local tools and editor files
-.tools/
+# Local credentials and signing material
+.keys/
+*.key
+*.key.pem
+
+# Python/editor files
 .venv/
 __pycache__/
 *.pyc

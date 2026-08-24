@@ -1,0 +1,10 @@
+PRETTY_NAME="OmniOS 1.0"
+NAME="OmniOS"
+VERSION_ID="1.0"
+VERSION="1.0 (Origin)"
+VERSION_CODENAME=origin
+ID=omnios
+ID_LIKE=debian
+HOME_URL="https://github.com/OmniNodeCo/OmniOS"
+SUPPORT_URL="https://github.com/OmniNodeCo/OmniOS/issues"
+BUG_REPORT_URL="https://github.com/OmniNodeCo/OmniOS/issues"

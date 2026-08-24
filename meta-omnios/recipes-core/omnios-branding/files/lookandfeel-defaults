@@ -1,5 +1,0 @@
-[kdeglobals][KDE]
-LookAndFeelPackage=org.omnios.desktop
-[Wallpaper]
-Image=OmniOS
-WallpaperPlugin=org.kde.image

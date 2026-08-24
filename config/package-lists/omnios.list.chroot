@@ -1,0 +1,75 @@
+# Debian live environment, KDE desktop, and graphical installer
+live-task-base
+live-task-recommended
+task-kde-desktop
+calamares-settings-debian
+
+# Kernel, microcode, graphics, Wi-Fi, Bluetooth, and other PC firmware
+linux-image-amd64
+linux-headers-amd64
+firmware-linux
+firmware-linux-free
+firmware-linux-nonfree
+firmware-misc-nonfree
+firmware-amd-graphics
+firmware-atheros
+firmware-brcm80211
+firmware-iwlwifi
+firmware-mediatek
+firmware-realtek
+firmware-sof-signed
+amd64-microcode
+intel-microcode
+
+# Networking, audio, device management, and security
+network-manager
+network-manager-openvpn
+plasma-nm
+wireguard-tools
+bluez
+bluedevil
+pipewire-audio
+wireplumber
+alsa-utils
+firewalld
+fwupd
+
+# Filesystems, storage health, installation, and rollback tools
+btrfs-progs
+btrfs-assistant
+snapper
+cryptsetup-initramfs
+dosfstools
+exfatprogs
+ntfs-3g
+xfsprogs
+lvm2
+mdadm
+nvme-cli
+smartmontools
+
+# Normal desktop applications and package management
+firefox-esr
+libreoffice
+vlc
+kdeconnect
+flatpak
+plasma-discover-backend-flatpak
+kde-config-flatpak
+unattended-upgrades
+apt-listchanges
+needrestart
+
+# Printing, fonts, diagnostics, and command-line essentials
+cups
+printer-driver-all
+fonts-noto
+fonts-noto-color-emoji
+bash-completion
+curl
+wget
+git
+nano
+vim
+pciutils
+usbutils

@@ -1,0 +1,10 @@
+[KDE]
+LookAndFeelPackage=org.omnios.desktop
+SingleClick=false
+
+[General]
+ColorScheme=BreezeDark
+Name=OmniOS
+
+[Icons]
+Theme=breeze-dark

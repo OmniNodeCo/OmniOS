@@ -1,0 +1,13 @@
+[Unit]
+Description=Initialize OmniOS system services
+After=local-fs.target
+ConditionPathExists=!/run/live/medium
+ConditionPathExists=!/var/lib/omnios/firstboot-complete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/omnios-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
