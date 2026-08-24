@@ -7,6 +7,16 @@ on:
         required: true
         default: true
         type: boolean
+      release_revision:
+        description: Monotonic patch revision (OmniOS bundle version 1.0.REVISION)
+        required: true
+        default: "0"
+        type: string
+      require_production_signing:
+        description: Fail unless production RAUC signing secrets are configured
+        required: true
+        default: false
+        type: boolean
 permissions:
   contents: read
 concurrency:
@@ -15,6 +25,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-24.04
+    environment: ${{ inputs.require_production_signing && 'production' || 'development' }}
     timeout-minutes: 360
     steps:
       - name: Check out OmniOS
@@ -28,7 +39,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes build-essential chrpath cpio debianutils diffstat file gawk gcc git \
-            iputils-ping libacl1 liblz4-tool locales python3 python3-git python3-jinja2 \
+            iputils-ping libacl1 liblz4-tool locales openssl python3 python3-git python3-jinja2 \
             python3-pexpect python3-pip python3-subunit python3-venv ovmf qemu-system-x86 \
             socat texinfo unzip wget xz-utils zstd
           python3 -m venv .venv
@@ -37,6 +48,24 @@ jobs:
           sudo locale-gen en_US.UTF-8
       - name: Validate project
         run: scripts/check-layer.sh
+      - name: Configure release revision
+        env:
+          RELEASE_REVISION: ${{ inputs.release_revision }}
+        run: |
+          [[ "$RELEASE_REVISION" =~ ^[0-9]+$ ]] || {
+            echo "release_revision must contain digits only" >&2
+            exit 1
+          }
+          mkdir -p build
+          cat > build/ci-overrides.yml <<EOF
+          header:
+            version: 19
+          local_conf_header:
+            ci-release: |
+              OMNIOS_RELEASE_REVISION = "$RELEASE_REVISION"
+          EOF
+          echo "KAS_FILE=$GITHUB_WORKSPACE/kas/omnios-x86_64.yml:$GITHUB_WORKSPACE/build/ci-overrides.yml" >> "$GITHUB_ENV"
+          echo "OMNIOS_RELEASE_REVISION=$RELEASE_REVISION" >> "$GITHUB_ENV"
       - name: Restore Yocto downloads
         uses: actions/cache@v5
         with:
@@ -47,9 +76,42 @@ jobs:
         run: scripts/build.sh checkout
       - name: Parse metadata
         run: scripts/build.sh parse
-      - name: Create ephemeral CI update signer
+      - name: Configure RAUC release signer
         if: inputs.full_build
-        run: scripts/generate-rauc-keys.sh
+        env:
+          REQUIRE_PRODUCTION_SIGNING: ${{ inputs.require_production_signing }}
+          RAUC_KEYRING_B64: ${{ secrets.OMNIOS_RAUC_KEYRING_PEM_B64 }}
+          RAUC_CERT_B64: ${{ secrets.OMNIOS_RAUC_CERT_PEM_B64 }}
+          RAUC_KEY_B64: ${{ secrets.OMNIOS_RAUC_KEY_PEM_B64 }}
+        run: |
+          mkdir -p .keys/rauc
+          chmod 0700 .keys/rauc
+          if [[ "$REQUIRE_PRODUCTION_SIGNING" != true ]]; then
+            rmdir .keys/rauc .keys
+            scripts/generate-rauc-keys.sh
+            signing_profile=development
+          else
+            if [[ -z "$RAUC_KEYRING_B64" || -z "$RAUC_CERT_B64" || -z "$RAUC_KEY_B64" ]]; then
+              echo "Production signing requires all three RAUC signing secrets" >&2
+              exit 1
+            fi
+            printf '%s' "$RAUC_KEYRING_B64" | base64 --decode > .keys/rauc/keyring.pem
+            printf '%s' "$RAUC_CERT_B64" | base64 --decode > .keys/rauc/release.cert.pem
+            printf '%s' "$RAUC_KEY_B64" | base64 --decode > .keys/rauc/release.key.pem
+            chmod 0644 .keys/rauc/keyring.pem .keys/rauc/release.cert.pem
+            chmod 0600 .keys/rauc/release.key.pem
+            openssl x509 -in .keys/rauc/release.cert.pem -noout -checkend 2592000
+            openssl pkey -in .keys/rauc/release.key.pem -check -noout
+            openssl verify -CAfile .keys/rauc/keyring.pem .keys/rauc/release.cert.pem
+            cert_public="$(openssl x509 -in .keys/rauc/release.cert.pem -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum | cut -d' ' -f1)"
+            key_public="$(openssl pkey -in .keys/rauc/release.key.pem -pubout -outform DER | sha256sum | cut -d' ' -f1)"
+            [[ "$cert_public" == "$key_public" ]] || {
+              echo "RAUC certificate and private key do not match" >&2
+              exit 1
+            }
+            signing_profile=production
+          fi
+          echo "SIGNING_PROFILE=$signing_profile" >> "$GITHUB_ENV"
       - name: Build image and signed bundle
         if: inputs.full_build
         run: scripts/build.sh build
@@ -73,6 +135,17 @@ jobs:
             \( -name 'omnios-plasma-image*.wic.zst' -o -name 'omnios-plasma-image*.wic.bmap' \
             -o -name 'omnios-plasma-image*.manifest' -o -name 'omnios-update-bundle*.raucb' \
             -o -name 'bzImage*' \) -exec cp -L {} out/ \;
+          cp .keys/rauc/keyring.pem out/RAUC-KEYRING.pem
+          cp .keys/rauc/release.cert.pem out/RAUC-RELEASE-CERT.pem
+          printf '%s\n' "$SIGNING_PROFILE" > out/SIGNING-PROFILE
+          cat > out/RELEASE-METADATA <<EOF
+          source_commit=$GITHUB_SHA
+          source_ref=$GITHUB_REF_NAME
+          workflow_run_id=$GITHUB_RUN_ID
+          release_revision=$OMNIOS_RELEASE_REVISION
+          bundle_version=1.0.$OMNIOS_RELEASE_REVISION
+          signing_profile=$SIGNING_PROFILE
+          EOF
           (cd out && sha256sum * > SHA256SUMS)
           ls -lh out
       - name: Upload OmniOS image

@@ -1,0 +1,170 @@
+name: Release OmniOS Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_run_id:
+        description: Successful production-signed Build OmniOS workflow run ID
+        required: true
+        type: string
+      tag:
+        description: Release tag matching the bundle version (for example v1.0.7)
+        required: true
+        type: string
+      prerelease:
+        description: Publish as a prerelease
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  actions: read
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: omnios-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out release metadata
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Validate source build
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.build_run_id }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || {
+            echo "build_run_id must contain digits only" >&2
+            exit 1
+          }
+          [[ "$RELEASE_TAG" =~ ^v1\.0\.([0-9]+)$ ]] || {
+            echo "tag must use the v1.0.REVISION format" >&2
+            exit 1
+          }
+          tag_revision="${BASH_REMATCH[1]}"
+
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
+          conclusion="$(jq -r '.conclusion' <<<"$run_json")"
+          workflow_name="$(jq -r '.name' <<<"$run_json")"
+          source_sha="$(jq -r '.head_sha' <<<"$run_json")"
+          source_branch="$(jq -r '.head_branch' <<<"$run_json")"
+          source_repository="$(jq -r '.head_repository.full_name' <<<"$run_json")"
+          default_branch="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.default_branch')"
+
+          [[ "$conclusion" == success ]] || { echo "Build run did not succeed" >&2; exit 1; }
+          [[ "$workflow_name" == "Build OmniOS Yocto Image" ]] || { echo "Unexpected source workflow: $workflow_name" >&2; exit 1; }
+          [[ "$source_repository" == "$GITHUB_REPOSITORY" ]] || { echo "Cross-repository artifacts are forbidden" >&2; exit 1; }
+          [[ "$source_branch" == "$default_branch" ]] || {
+            echo "Releases must come from the default branch ($default_branch), not $source_branch" >&2
+            exit 1
+          }
+          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid source commit" >&2; exit 1; }
+          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Tag already exists: $RELEASE_TAG" >&2
+            exit 1
+          fi
+
+          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "revision=$tag_revision" >> "$GITHUB_OUTPUT"
+          echo "branch=$source_branch" >> "$GITHUB_OUTPUT"
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v5
+        with:
+          name: OmniOS-1.0-x86_64
+          path: release
+          run-id: ${{ inputs.build_run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Verify production artifact
+        env:
+          EXPECTED_SHA: ${{ steps.source.outputs.sha }}
+          EXPECTED_REVISION: ${{ steps.source.outputs.revision }}
+          EXPECTED_RUN_ID: ${{ inputs.build_run_id }}
+        run: |
+          cd release
+          sha256sum --check SHA256SUMS
+
+          [[ "$(tr -d '\r\n' < SIGNING-PROFILE)" == production ]] || {
+            echo "Refusing to release an artifact signed with development keys" >&2
+            exit 1
+          }
+
+          metadata_value() {
+            awk -F= -v key="$1" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' RELEASE-METADATA
+          }
+          [[ "$(metadata_value source_commit)" == "$EXPECTED_SHA" ]] || { echo "Source commit mismatch" >&2; exit 1; }
+          [[ "$(metadata_value workflow_run_id)" == "$EXPECTED_RUN_ID" ]] || { echo "Workflow run mismatch" >&2; exit 1; }
+          [[ "$(metadata_value release_revision)" == "$EXPECTED_REVISION" ]] || { echo "Release revision mismatch" >&2; exit 1; }
+          [[ "$(metadata_value bundle_version)" == "1.0.$EXPECTED_REVISION" ]] || { echo "Bundle version mismatch" >&2; exit 1; }
+
+          compgen -G 'omnios-plasma-image*.wic.zst' >/dev/null
+          compgen -G 'omnios-plasma-image*.wic.bmap' >/dev/null
+          compgen -G 'omnios-update-bundle*.raucb' >/dev/null
+          openssl x509 -in RAUC-RELEASE-CERT.pem -noout -checkend 2592000
+          openssl verify -CAfile RAUC-KEYRING.pem RAUC-RELEASE-CERT.pem
+
+      - name: Prepare public release files
+        run: |
+          mkdir -p publish
+          find release -maxdepth 1 -type f \
+            \( -name 'omnios-plasma-image*.wic.zst' \
+            -o -name 'omnios-plasma-image*.wic.bmap' \
+            -o -name 'omnios-plasma-image*.manifest' \
+            -o -name 'omnios-update-bundle*.raucb' \
+            -o -name 'bzImage*' \
+            -o -name 'RAUC-KEYRING.pem' \
+            -o -name 'RAUC-RELEASE-CERT.pem' \
+            -o -name 'RELEASE-METADATA' \
+            -o -name 'SIGNING-PROFILE' \) \
+            -exec cp {} publish/ \;
+          (cd publish && sha256sum * > SHA256SUMS)
+          ls -lh publish
+
+      - name: Attest release provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-path: publish/*
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          SOURCE_BRANCH: ${{ steps.source.outputs.branch }}
+          SOURCE_RUN_ID: ${{ inputs.build_run_id }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          cat > release-notes.md <<EOF
+          OmniOS ${RELEASE_TAG#v} for generic x86-64 PCs.
+
+          - Source commit: \`$SOURCE_SHA\`
+          - Source branch: \`$SOURCE_BRANCH\`
+          - Build workflow run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID
+          - Update format: signed RAUC verity bundle with A/B rollback
+          - Disk image: compressed hybrid BIOS/UEFI WIC image
+
+          Verify downloaded files with \`SHA256SUMS\` and the GitHub artifact attestations before flashing.
+          EOF
+
+          release_flags=()
+          [[ "$PRERELEASE" == true ]] && release_flags+=(--prerelease)
+          gh release create "$RELEASE_TAG" publish/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SOURCE_SHA" \
+            --title "OmniOS ${RELEASE_TAG#v}" \
+            --notes-file release-notes.md \
+            "${release_flags[@]}"

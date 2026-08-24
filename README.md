@@ -104,13 +104,20 @@ DNF feeds may supplement applications, but base OS releases use RAUC to avoid pa
 
 ## CI template
 
-[`ci/build.yml`](ci/build.yml) is deliberately outside `.github/workflows/` so repository owners can review and install it themselves:
+[`ci/build.yml`](ci/build.yml) and [`ci/release.yml`](ci/release.yml) are deliberately outside `.github/workflows/` so repository owners can review and install them:
 
 ```bash
 cp ci/build.yml .github/workflows/build.yml
+cp ci/release.yml .github/workflows/release.yml
 ```
 
-It validates metadata, builds the image and signed bundle, generates feed metadata, smoke-tests BIOS and UEFI boot, and uploads artifacts. Replace its ephemeral CI signer with protected infrastructure for public releases.
+The build workflow validates metadata, applies a monotonic release revision, builds the image and signed bundle, generates feed metadata, smoke-tests BIOS and UEFI boot, and uploads checksummed artifacts. Without secrets it uses development signing and marks the artifact accordingly. Production builds require these base64-encoded repository or environment secrets:
+
+- `OMNIOS_RAUC_KEYRING_PEM_B64`
+- `OMNIOS_RAUC_CERT_PEM_B64`
+- `OMNIOS_RAUC_KEY_PEM_B64`
+
+Set `require_production_signing=true` for a releasable build. The release workflow accepts that successful build's run ID and a matching `v1.0.REVISION` tag, requires a default-branch source and production signing, verifies all checksums and metadata, creates provenance attestations, and publishes the GitHub release.
 
 ## Layout
 

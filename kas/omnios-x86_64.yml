@@ -82,9 +82,9 @@ local_conf_header:
     PARALLEL_MAKE ?= "-j ${@oe.utils.cpu_count()}"
 
     # Signing material remains outside Git.
-    OMNIOS_RAUC_KEYRING = "${TOPDIR}/../.keys/rauc/ca.cert.pem"
-    RAUC_KEY_FILE = "${TOPDIR}/../.keys/rauc/ca.key.pem"
-    RAUC_CERT_FILE = "${TOPDIR}/../.keys/rauc/ca.cert.pem"
+    OMNIOS_RAUC_KEYRING = "${TOPDIR}/../.keys/rauc/keyring.pem"
+    RAUC_KEY_FILE = "${TOPDIR}/../.keys/rauc/release.key.pem"
+    RAUC_CERT_FILE = "${TOPDIR}/../.keys/rauc/release.cert.pem"
 
     INHERIT += "create-spdx"
     SPDX_ARCHIVE_PACKAGED = "0"

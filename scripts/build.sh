@@ -6,7 +6,7 @@ KAS_BIN="${KAS_BIN:-$(command -v kas 2>/dev/null || true)}"
 [[ -n "$KAS_BIN" ]] || { echo 'ERROR: kas required; run scripts/bootstrap-host.sh' >&2; exit 1; }
 case "${1:-build}" in
  build)
-  for f in "$ROOT/.keys/rauc/ca.key.pem" "$ROOT/.keys/rauc/ca.cert.pem"; do
+  for f in "$ROOT/.keys/rauc/release.key.pem" "$ROOT/.keys/rauc/release.cert.pem" "$ROOT/.keys/rauc/keyring.pem"; do
    [[ -s "$f" ]] || { echo "ERROR: missing RAUC signing material: $f" >&2; echo 'Run scripts/generate-rauc-keys.sh.' >&2; exit 1; }
   done
   "$KAS_BIN" build "$KAS_FILE" ;;
