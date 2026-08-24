@@ -4,6 +4,8 @@ OmniOS 2026.1 is a normal, installable KDE Plasma desktop operating system based
 
 The live session and installed system use the same package set. Users can try the desktop from USB and install it with the Calamares graphical installer.
 
+See [CHANGELOG.md](CHANGELOG.md) for the complete 2026.1 release changelog.
+
 ## Included system
 
 - KDE Plasma desktop with Wayland and X11 support
@@ -135,7 +137,7 @@ git commit -m "ci: install Debian ISO workflows"
 git push
 ```
 
-The build workflow caches downloaded Debian packages, builds inside `debian:13-slim`, verifies the ISO checksum, tests BIOS and UEFI boot, and uploads the artifact. The release workflow verifies the source run and checksums, creates GitHub provenance attestations, and publishes the ISO.
+The build workflow caches downloaded Debian packages, builds inside `debian:13-slim`, verifies the ISO checksum, optionally tests BIOS and UEFI boot when selected, and uploads the artifact. The release workflow verifies the source run and checksums, creates GitHub provenance attestations, and publishes the ISO.
 
 ## Release engineering
 
