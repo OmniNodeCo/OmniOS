@@ -61,6 +61,17 @@ prepare_bootloader_branding() {
         "$ROOT/branding/boot-splash.svg" \
         --output "$WORK_DIR/config/bootloaders/grub-pc/splash.png"
 
+    # Debian's stock ISOLINUX template waits forever (timeout 0), which is
+    # appropriate for installation media but prevents unattended boot tests.
+    # Five seconds keeps the menu usable while allowing both BIOS and UEFI
+    # media to boot the first live entry automatically.
+    sed -i \
+        -e 's/^timeout .*/timeout 50/' \
+        -e '/^prompt /a serial 0 115200' \
+        "$WORK_DIR/config/bootloaders/isolinux/isolinux.cfg"
+    sed -i '/^set default=0$/a set timeout=5' \
+        "$WORK_DIR/config/bootloaders/grub-pc/config.cfg"
+
     find "$WORK_DIR/config/bootloaders" -type f \
         \( -name '*.cfg' -o -name '*.txt' -o -name '*.theme' \) \
         -exec sed -i \
