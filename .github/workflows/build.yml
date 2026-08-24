@@ -1,171 +1,86 @@
-name: Build OmniOS ISO
-
+name: Build OmniOS Yocto Image
 on:
   workflow_dispatch:
     inputs:
-      ubuntu_version:
-        description: Ubuntu point release, or "latest"
+      full_build:
+        description: Build the complete KDE Plasma disk image
         required: true
-        default: latest
-        type: string
-
-  schedule:
-    # Refresh the Ubuntu ISO cache without rebuilding OmniOS.
-    - cron: "17 3 */5 * *"
-
+        default: true
+        type: boolean
 permissions:
   contents: read
-
 concurrency:
-  group: omnios-iso-build
+  group: omnios-yocto-x86-64
   cancel-in-progress: false
-
 jobs:
   build:
-    name: Build and test OmniOS
     runs-on: ubuntu-24.04
-    timeout-minutes: 300
-
-    env:
-      REQUESTED_VERSION: ${{ inputs.ubuntu_version || 'latest' }}
-
+    timeout-minutes: 360
     steps:
       - name: Check out OmniOS
         uses: actions/checkout@v5
-
-      - name: Validate customization scripts
-        run: |
-          bash -n scripts/*.sh assets/*.sh
-
       - name: Free runner disk space
         run: |
-          sudo rm -rf \
-            /usr/local/lib/android \
-            /usr/share/dotnet \
-            /opt/ghc \
-            /opt/hostedtoolcache/CodeQL || true
-
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
           sudo apt-get clean
           df -h /
-
-      - name: Resolve the Ubuntu release
-        id: release
-        env:
-          UBUNTU_VERSION: ${{ env.REQUESTED_VERSION }}
-        run: |
-          bash scripts/resolve-ubuntu-release.sh >> "$GITHUB_OUTPUT"
-
-      - name: Restore the verified Ubuntu ISO
-        id: iso-cache
-        uses: actions/cache@v5
-        with:
-          path: iso/${{ steps.release.outputs.iso }}
-          key: ubuntu-desktop-amd64-${{ steps.release.outputs.sha256 }}
-
-      - name: Download Ubuntu on a cache miss
-        if: steps.iso-cache.outputs.cache-hit != 'true'
-        env:
-          UBUNTU_VERSION: ${{ steps.release.outputs.version }}
-          ISO_DIR: iso
-        run: |
-          bash scripts/download-ubuntu.sh
-
-      - name: Verify the restored or downloaded Ubuntu ISO
-        env:
-          ISO_NAME: ${{ steps.release.outputs.iso }}
-          ISO_SHA256: ${{ steps.release.outputs.sha256 }}
-        run: |
-          printf '%s *%s\n' "$ISO_SHA256" "$ISO_NAME" \
-            | (cd iso && sha256sum --check -)
-
-      - name: Install ISO and QEMU build tools
-        if: github.event_name == 'workflow_dispatch'
+      - name: Install Yocto host tools
         run: |
           sudo apt-get update
-
-          sudo apt-get install --yes \
-            qemu-system-x86 \
-            squashfs-tools \
-            xorriso
-
-      - name: Build the bootable OmniOS ISO
-        if: github.event_name == 'workflow_dispatch'
+          sudo apt-get install --yes build-essential chrpath cpio debianutils diffstat file gawk gcc git \
+            iputils-ping libacl1 liblz4-tool locales python3 python3-git python3-jinja2 \
+            python3-pexpect python3-pip python3-subunit python3-venv ovmf qemu-system-x86 \
+            socat texinfo unzip wget xz-utils zstd
+          python3 -m venv .venv
+          .venv/bin/pip install kas==5.5 shellcheck-py
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+          sudo locale-gen en_US.UTF-8
+      - name: Validate project
+        run: scripts/check-layer.sh
+      - name: Restore Yocto downloads
+        uses: actions/cache@v5
+        with:
+          path: build/downloads
+          key: omnios-wrynose-downloads-${{ hashFiles('kas/*.yml', 'meta-omnios/**/*.bb*') }}
+          restore-keys: omnios-wrynose-downloads-
+      - name: Check out pinned layers
+        run: scripts/build.sh checkout
+      - name: Parse metadata
+        run: scripts/build.sh parse
+      - name: Create ephemeral CI update signer
+        if: inputs.full_build
+        run: scripts/generate-rauc-keys.sh
+      - name: Build image and signed bundle
+        if: inputs.full_build
+        run: scripts/build.sh build
+      - name: Generate RPM repository metadata
+        if: inputs.full_build
+        run: scripts/build.sh feed
+      - name: Boot smoke test (legacy BIOS)
+        if: inputs.full_build
+        run: scripts/smoke-test.sh
+      - name: Boot smoke test (UEFI)
+        if: inputs.full_build
         env:
-          SOURCE_ISO: iso/${{ steps.release.outputs.iso }}
-          OUTPUT_ISO: out/OmniOS-1.0-amd64.iso
-          SQUASHFS_PROCESSORS: "2"
+          QEMU_UEFI: "1"
+        run: scripts/smoke-test.sh
+      - name: Collect release artifacts
+        if: inputs.full_build
         run: |
-          sudo --preserve-env=SOURCE_ISO,OUTPUT_ISO,SQUASHFS_PROCESSORS \
-            bash scripts/build-iso.sh
-
-          sudo chown -R "$USER:$USER" out
-          df -h /
-
-      - name: Verify the OmniOS checksum
-        if: github.event_name == 'workflow_dispatch'
-        run: |
-          cd out
-          sha256sum --check OmniOS-1.0-amd64.iso.sha256
-
-      - name: Smoke test the OmniOS live boot in QEMU
-        id: smoke-test
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          BOOT_TIMEOUT: "600"
-          BOOT_MEMORY: "4096"
-          BOOT_CPUS: "2"
-          BOOT_LOG: out/qemu-boot.log
-        run: |
-          bash scripts/test-iso.sh out/OmniOS-1.0-amd64.iso
-
-      - name: Upload QEMU boot diagnostics
-        if: always() && github.event_name == 'workflow_dispatch'
+          mkdir -p out
+          rm -f out/*.wic out/OVMF*.fd
+          find build/tmp/deploy/images/genericx86-64 -maxdepth 1 -type f \
+            \( -name 'omnios-plasma-image*.wic.zst' -o -name 'omnios-plasma-image*.wic.bmap' \
+            -o -name 'omnios-plasma-image*.manifest' -o -name 'omnios-update-bundle*.raucb' \
+            -o -name 'bzImage*' \) -exec cp -L {} out/ \;
+          (cd out && sha256sum * > SHA256SUMS)
+          ls -lh out
+      - name: Upload OmniOS image
+        if: inputs.full_build
         uses: actions/upload-artifact@v4
         with:
-          name: OmniOS-QEMU-boot-log
-          path: out/qemu-boot.log
-          if-no-files-found: ignore
-          retention-days: 14
-
-      - name: Upload OmniOS ISO
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
-        with:
-          name: OmniOS-1.0-amd64
-          path: |
-            out/OmniOS-1.0-amd64.iso
-            out/OmniOS-1.0-amd64.iso.sha256
-          if-no-files-found: error
+          name: OmniOS-1.0-x86_64
+          path: out/
           compression-level: 0
           retention-days: 14
-
-      - name: Write job summary
-        if: always()
-        env:
-          CACHE_HIT: ${{ steps.iso-cache.outputs.cache-hit }}
-          ISO_NAME: ${{ steps.release.outputs.iso }}
-          ISO_SHA256: ${{ steps.release.outputs.sha256 }}
-          SMOKE_TEST: ${{ steps.smoke-test.outcome }}
-        run: |
-          {
-            echo "## OmniOS build"
-            echo
-            echo "- Base image: \`${ISO_NAME:-not resolved}\`"
-            echo "- Base SHA-256: \`${ISO_SHA256:-not resolved}\`"
-            echo "- Existing ISO cache restored: \`${CACHE_HIT:-false}\`"
-
-            if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-              echo "- QEMU boot test: \`${SMOKE_TEST:-not run}\`"
-
-              if [[ "$SMOKE_TEST" == "success" ]]; then
-                echo "- Output artifact: \`OmniOS-1.0-amd64\`"
-                echo "- Output image: \`OmniOS-1.0-amd64.iso\`"
-              else
-                echo "- The final ISO artifact was not published because the build or boot test failed."
-                echo "- Download \`OmniOS-QEMU-boot-log\` for diagnostics."
-              fi
-            else
-              echo "- Scheduled cache refresh completed."
-              echo "- No final OmniOS ISO was built during this scheduled run."
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+          if-no-files-found: error
