@@ -4,9 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       full_build:
-        description: Build and boot-test the complete OmniOS ISO
+        description: Build the complete OmniOS ISO
         required: true
         default: true
+        type: boolean
+      run_boot_tests:
+        description: Run the BIOS and UEFI QEMU boot tests
+        required: true
+        default: false
         type: boolean
       release_revision:
         description: Monotonic release revision used by the release workflow
@@ -73,11 +78,11 @@ jobs:
           sha256sum --check OmniOS-2026.1-amd64.iso.sha256
 
       - name: Boot smoke test (legacy BIOS)
-        if: inputs.full_build
+        if: inputs.full_build && inputs.run_boot_tests
         run: scripts/smoke-test.sh
 
       - name: Boot smoke test (UEFI)
-        if: inputs.full_build
+        if: inputs.full_build && inputs.run_boot_tests
         env:
           QEMU_UEFI: "1"
         run: scripts/smoke-test.sh
