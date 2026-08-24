@@ -17,10 +17,15 @@ exec docker run --rm --privileged \
     debian:13-slim \
     bash -Eeuo pipefail -c '
         export DEBIAN_FRONTEND=noninteractive
+        if [[ -f /etc/apt/sources.list.d/debian.sources ]]; then
+            sed -i "s/^Components: main$/Components: main contrib non-free-firmware/" \
+                /etc/apt/sources.list.d/debian.sources
+        fi
         apt-get update
         apt-get install --yes --no-install-recommends \
             ca-certificates debootstrap dosfstools fdisk git gnupg grub-efi-amd64-bin \
             grub-pc-bin isolinux librsvg2-bin live-build mtools rsync shim-signed squashfs-tools \
             syslinux-common xorriso zstd
+        scripts/check-packages.sh
         scripts/build.sh build
     '
