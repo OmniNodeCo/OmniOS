@@ -1,0 +1,11 @@
+# OmniOS static mounts. Root is selected by GRUB and RAUC.
+/dev/root         /          auto    rw  1 1
+LABEL=OMNIOS-BOOT /boot      vfat    defaults,noatime,umask=0077,nodev,nosuid,noexec 0 2
+LABEL=OMNIOS-ENV  /grubenv   vfat    defaults,sync,umask=0077,nodev,nosuid,noexec 0 2
+LABEL=omnios-data /data      ext4    defaults,noatime,nodev,nosuid 0 2
+overlay           /etc       overlay nodev,nosuid,lowerdir=/etc,upperdir=/data/etc/upper,workdir=/data/etc/work,x-systemd.requires=omnios-persistent-data.service,x-systemd.after=omnios-persistent-data.service 0 0
+/data/home        /home      none    bind,x-systemd.requires=omnios-persistent-data.service,x-systemd.after=omnios-persistent-data.service 0 0
+proc              /proc      proc    defaults 0 0
+devpts            /dev/pts   devpts  mode=0620,ptmxmode=0666,gid=5 0 0
+tmpfs             /run       tmpfs   mode=0755,nodev,nosuid,strictatime 0 0
+tmpfs             /var/volatile tmpfs defaults 0 0

@@ -1,0 +1,91 @@
+header:
+  version: 19
+
+machine: genericx86-64
+distro: omnios
+target:
+  - omnios-plasma-image
+  - omnios-update-bundle
+
+repos:
+  bitbake:
+    url: https://github.com/openembedded/bitbake.git
+    commit: acfe02fa38b5da9e6a36c6cedcf91d4fcbefbfbd
+    branch: "2.18"
+    layers: {}
+
+  openembedded-core:
+    url: https://github.com/openembedded/openembedded-core.git
+    commit: 5d1aa5c806c061a2994f4decb59016610f093213
+    branch: wrynose
+    layers:
+      meta:
+
+  meta-yocto:
+    url: https://github.com/yoctoproject/meta-yocto.git
+    commit: 24c24cef5d1523fefe43a3e3d34667b37ae551f3
+    branch: wrynose
+    layers:
+      meta-poky:
+      meta-yocto-bsp:
+
+  meta-openembedded:
+    url: https://github.com/openembedded/meta-openembedded.git
+    commit: 6bf0d8ad57b33950bab4c7f6c037e1ccb6f6e2eb
+    branch: wrynose
+    layers:
+      meta-oe:
+      meta-networking:
+      meta-multimedia:
+      meta-python:
+      meta-filesystems:
+      meta-perl:
+
+  meta-qt6:
+    url: https://github.com/YoeDistro/meta-qt6.git
+    commit: edb288a0c430059ab000056f4981c794d61ba3ba
+    branch: "yoe/6.10"
+
+  meta-rauc:
+    url: https://github.com/rauc/meta-rauc.git
+    commit: 38da0e5866a953e664001ba90b5edad68d68cd5d
+    branch: wrynose
+
+  meta-kf6:
+    url: https://github.com/KDE/yocto-meta-kf6.git
+    commit: e181491885b89da188959f321588f1d0ac7bd3fe
+    branch: master
+
+  meta-kde:
+    url: https://github.com/KDE/yocto-meta-kde.git
+    commit: 1a3ab9ce6d52aad2c263c8cdaf372e0374efe8f1
+    branch: master
+
+  omnios:
+    path: .
+    layers:
+      meta-omnios:
+
+local_conf_header:
+  omnios: |
+    CONF_VERSION = "2"
+    PACKAGE_CLASSES = "package_rpm"
+    EXTRA_IMAGE_FEATURES += "package-management"
+
+    DL_DIR = "${TOPDIR}/downloads"
+    SSTATE_DIR = "${TOPDIR}/sstate-cache"
+    BUILDHISTORY_DIR = "${TOPDIR}/buildhistory"
+    CONNECTIVITY_CHECK_URIS = "https://github.com/"
+    UNINATIVE_URL = "https://downloads.yoctoproject.org/releases/uninative/${UNINATIVE_VERSION}/"
+
+    BB_NUMBER_THREADS ?= "${@oe.utils.cpu_count()}"
+    PARALLEL_MAKE ?= "-j ${@oe.utils.cpu_count()}"
+
+    # Signing material remains outside Git.
+    OMNIOS_RAUC_KEYRING = "${TOPDIR}/../.keys/rauc/ca.cert.pem"
+    RAUC_KEY_FILE = "${TOPDIR}/../.keys/rauc/ca.key.pem"
+    RAUC_CERT_FILE = "${TOPDIR}/../.keys/rauc/ca.cert.pem"
+
+    INHERIT += "create-spdx"
+    SPDX_ARCHIVE_PACKAGED = "0"
+    SPDX_INCLUDE_SOURCES = "0"

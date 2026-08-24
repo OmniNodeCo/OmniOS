@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+install -d -m 0755 /data/home /data/etc/upper /data/etc/work /data/rauc /data/omnios-update
+if [[ ! -e /data/.omnios-home-initialized ]]; then
+    cp -a /home/. /data/home/
+    touch /data/.omnios-home-initialized
+fi

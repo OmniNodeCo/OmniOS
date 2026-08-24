@@ -1,17 +1,36 @@
-# Downloaded source images and generated bundles
-iso/
-out/
+# Yocto/Kas checkouts and build output
 build/
+sources/
+downloads/
+sstate-cache/
+
+# Kas external repositories
+/bitbake/
+/openembedded-core/
+/meta-yocto/
+/meta-openembedded/
+/meta-qt6/
+/meta-rauc/
+/meta-kf6/
+/meta-kde/
+
+# Generated images, feeds, SDKs, and keys
+out/
+deploy/
+.keys/
+*.wic
+*.wic.*
+*.bmap
 *.iso
-*.iso.part
+*.qcow2
+*.vmdk
+*.raucb
 
-# Cubic project directories can contain an extracted root filesystem.
-cubic-project/
-projects/
-
-# Logs and editor/OS files
-*.log
-.DS_Store
-Thumbs.db
+# Local tools and editor files
+.tools/
+.venv/
+__pycache__/
+*.pyc
 *.swp
 *~
+.DS_Store

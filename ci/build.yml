@@ -1,0 +1,86 @@
+name: Build OmniOS Yocto Image
+on:
+  workflow_dispatch:
+    inputs:
+      full_build:
+        description: Build the complete KDE Plasma disk image
+        required: true
+        default: true
+        type: boolean
+permissions:
+  contents: read
+concurrency:
+  group: omnios-yocto-x86-64
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    steps:
+      - name: Check out OmniOS
+        uses: actions/checkout@v5
+      - name: Free runner disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo apt-get clean
+          df -h /
+      - name: Install Yocto host tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential chrpath cpio debianutils diffstat file gawk gcc git \
+            iputils-ping libacl1 liblz4-tool locales python3 python3-git python3-jinja2 \
+            python3-pexpect python3-pip python3-subunit python3-venv ovmf qemu-system-x86 \
+            socat texinfo unzip wget xz-utils zstd
+          python3 -m venv .venv
+          .venv/bin/pip install kas==5.5 shellcheck-py
+          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
+          sudo locale-gen en_US.UTF-8
+      - name: Validate project
+        run: scripts/check-layer.sh
+      - name: Restore Yocto downloads
+        uses: actions/cache@v5
+        with:
+          path: build/downloads
+          key: omnios-wrynose-downloads-${{ hashFiles('kas/*.yml', 'meta-omnios/**/*.bb*') }}
+          restore-keys: omnios-wrynose-downloads-
+      - name: Check out pinned layers
+        run: scripts/build.sh checkout
+      - name: Parse metadata
+        run: scripts/build.sh parse
+      - name: Create ephemeral CI update signer
+        if: inputs.full_build
+        run: scripts/generate-rauc-keys.sh
+      - name: Build image and signed bundle
+        if: inputs.full_build
+        run: scripts/build.sh build
+      - name: Generate RPM repository metadata
+        if: inputs.full_build
+        run: scripts/build.sh feed
+      - name: Boot smoke test (legacy BIOS)
+        if: inputs.full_build
+        run: scripts/smoke-test.sh
+      - name: Boot smoke test (UEFI)
+        if: inputs.full_build
+        env:
+          QEMU_UEFI: "1"
+        run: scripts/smoke-test.sh
+      - name: Collect release artifacts
+        if: inputs.full_build
+        run: |
+          mkdir -p out
+          rm -f out/*.wic out/OVMF*.fd
+          find build/tmp/deploy/images/genericx86-64 -maxdepth 1 -type f \
+            \( -name 'omnios-plasma-image*.wic.zst' -o -name 'omnios-plasma-image*.wic.bmap' \
+            -o -name 'omnios-plasma-image*.manifest' -o -name 'omnios-update-bundle*.raucb' \
+            -o -name 'bzImage*' \) -exec cp -L {} out/ \;
+          (cd out && sha256sum * > SHA256SUMS)
+          ls -lh out
+      - name: Upload OmniOS image
+        if: inputs.full_build
+        uses: actions/upload-artifact@v4
+        with:
+          name: OmniOS-1.0-x86_64
+          path: out/
+          compression-level: 0
+          retention-days: 14
+          if-no-files-found: error

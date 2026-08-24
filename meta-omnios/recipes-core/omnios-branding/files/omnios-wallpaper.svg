@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="3840" height="2160" viewBox="0 0 3840 2160">
+ <defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#050B18"/><stop offset=".55" stop-color="#0B2540"/><stop offset="1" stop-color="#176B87"/></linearGradient>
+  <radialGradient id="glow"><stop stop-color="#64D8FF" stop-opacity=".22"/><stop offset="1" stop-color="#64D8FF" stop-opacity="0"/></radialGradient>
+ </defs>
+ <rect width="3840" height="2160" fill="url(#bg)"/><rect width="3840" height="2160" fill="url(#glow)"/>
+ <g opacity=".3" stroke="#78DFFF" stroke-width="5" fill="none"><path d="M340 420L1020 720 1530 380 2250 670 3080 330 3500 760"/><path d="M180 1590L850 1320 1390 1690 2040 1360 2700 1730 3600 1420"/><path d="M1020 720L850 1320M1530 380L1390 1690M2250 670L2040 1360M3080 330L2700 1730"/></g>
+ <g text-anchor="middle" fill="#F4FBFF" font-family="Noto Sans,sans-serif"><text x="1920" y="1010" font-size="270" font-weight="600" letter-spacing="14">OmniOS</text><text x="1920" y="1145" font-size="54" font-weight="300" letter-spacing="22" fill="#A9EBFF">OPEN · SECURE · YOURS</text></g>
+</svg>

@@ -1,0 +1,14 @@
+[Unit]
+Description=Initialize persistent OmniOS data
+DefaultDependencies=no
+Requires=data.mount
+After=data.mount
+Before=etc.mount home.mount local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/omnios-persistent-data
+RemainAfterExit=yes
+
+[Install]
+WantedBy=local-fs.target

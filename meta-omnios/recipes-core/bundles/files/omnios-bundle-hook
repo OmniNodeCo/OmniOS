@@ -1,0 +1,14 @@
+#!/bin/sh
+set -eu
+case "${1:-}" in
+    slot-post-install)
+        [ "${RAUC_SLOT_CLASS:-}" = rootfs ] || exit 0
+        case "${RAUC_SLOT_BOOTNAME:-}" in
+            A) label=omnios-root-a ;;
+            B) label=omnios-root-b ;;
+            *) echo "Unknown root slot: ${RAUC_SLOT_BOOTNAME:-unset}" >&2; exit 1 ;;
+        esac
+        e2label "$RAUC_SLOT_DEVICE" "$label"
+        ;;
+    *) exit 1 ;;
+esac
