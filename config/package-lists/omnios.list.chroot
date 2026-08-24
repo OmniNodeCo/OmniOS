@@ -32,7 +32,10 @@ pipewire-audio
 wireplumber
 alsa-utils
 firewalld
+plasma-firewall
 fwupd
+power-profiles-daemon
+thermald
 
 # Filesystems, storage health, installation, and rollback tools
 btrfs-progs
@@ -52,6 +55,11 @@ smartmontools
 firefox-esr
 libreoffice
 vlc
+ffmpeg
+gstreamer1.0-libav
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-bad
+gstreamer1.0-plugins-ugly
 kdeconnect
 flatpak
 plasma-discover-backend-flatpak
@@ -59,6 +67,44 @@ kde-config-flatpak
 unattended-upgrades
 apt-listchanges
 needrestart
+
+# Complete KDE desktop, backup, sharing, and scanning tools
+ark
+filelight
+gwenview
+kate
+kcalc
+okular
+partitionmanager
+spectacle
+kup-backup
+skanpage
+sane-airscan
+sane-utils
+kdenetwork-filesharing
+samba-common-bin
+smbclient
+
+# Security, identity protection, auditing, and advanced antivirus
+apparmor
+apparmor-utils
+apparmor-profiles
+apparmor-profiles-extra
+apparmor-notify
+auditd
+audispd-plugins
+debsums
+lynis
+keepassxc-full
+webext-keepassxc-browser
+kleopatra
+fido2-tools
+libpam-u2f
+gnupg2
+clamav
+clamav-daemon
+clamav-freshclam
+clamtk
 
 # Printing, fonts, diagnostics, and command-line essentials
 cups

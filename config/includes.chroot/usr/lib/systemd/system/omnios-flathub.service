@@ -1,0 +1,14 @@
+[Unit]
+Description=Enable the Flathub application repository
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=!/run/live/medium
+ConditionPathExists=!/var/lib/omnios/flathub-configured
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/omnios-enable-flathub
+RemainAfterExit=true
+
+[Install]
+WantedBy=multi-user.target

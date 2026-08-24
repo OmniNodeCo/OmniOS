@@ -1,0 +1,14 @@
+[Unit]
+Description=OmniOS scheduled antivirus scan
+Documentation=man:clamdscan(1)
+After=clamav-daemon.service local-fs.target
+Wants=clamav-daemon.service
+ConditionACPower=true
+ConditionPathExists=!/run/live/medium
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/omnios-antivirus-scan
+Nice=15
+IOSchedulingClass=idle
+CPUWeight=10

@@ -1,0 +1,45 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+LOCK=/run/lock/omnios-antivirus.lock
+LOG=/var/log/omnios-antivirus.log
+STATUS_DIR=/var/lib/omnios
+umask 027
+
+install -d -m 0755 "$(dirname "$LOCK")" "$STATUS_DIR"
+exec 9>"$LOCK"
+flock --nonblock 9 || exit 0
+
+{
+    printf '\n=== OmniOS antivirus scan: %s ===\n' "$(date --iso-8601=seconds)"
+    if ! systemctl is-active --quiet clamav-daemon.service; then
+        echo 'ClamAV daemon is not running; scan deferred.'
+        exit 2
+    fi
+
+    scan_targets=()
+    [[ -d /home ]] && scan_targets+=(/home)
+    (( ${#scan_targets[@]} )) || { echo 'No user directories to scan.'; exit 0; }
+
+    set +e
+    clamdscan --fdpass --multiscan --infected "${scan_targets[@]}"
+    scan_status=$?
+    set -e
+
+    case "$scan_status" in
+        0)
+            rm -f "$STATUS_DIR/antivirus-threat-detected"
+            echo 'No malware detected.'
+            ;;
+        1)
+            touch "$STATUS_DIR/antivirus-threat-detected"
+            logger --priority auth.warning --tag omnios-antivirus \
+                'ClamAV detected one or more suspicious files. Review the antivirus log.'
+            echo 'WARNING: suspicious files were detected. No files were deleted automatically.'
+            ;;
+        *)
+            echo "ClamAV scan failed with status $scan_status."
+            exit "$scan_status"
+            ;;
+    esac
+} 2>&1 | tee -a "$LOG"

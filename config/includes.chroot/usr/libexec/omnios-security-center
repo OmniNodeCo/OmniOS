@@ -1,0 +1,24 @@
+#!/bin/bash
+set -Eeuo pipefail
+
+choice="$(kdialog --title 'OmniOS Security Center' --menu 'Choose a security tool:' \
+    antivirus 'Antivirus and file scanning' \
+    firewall 'Firewall configuration' \
+    passwords 'Password manager' \
+    snapshots 'System snapshots and recovery' \
+    audit 'Advanced system security audit' \
+    updates 'Software and security updates' || true)"
+
+case "$choice" in
+    antivirus) exec clamtk ;;
+    firewall) exec systemsettings kcm_firewall ;;
+    passwords) exec keepassxc ;;
+    snapshots) exec btrfs-assistant ;;
+    audit)
+        exec konsole --hold -e bash -lc \
+            "echo 'Running the Lynis system audit with administrator privileges...'; sudo lynis audit system"
+        ;;
+    updates) exec plasma-discover --mode update ;;
+    '') exit 0 ;;
+    *) kdialog --error "Unknown Security Center action: $choice" ;;
+esac

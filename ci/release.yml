@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       tag:
-        description: Release tag matching the build revision (for example v1.0.7)
+        description: Release tag matching the build revision (for example v2026.1.7)
         required: true
         type: string
       prerelease:
@@ -47,7 +47,7 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: |
           [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "build_run_id must contain digits only" >&2; exit 1; }
-          [[ "$RELEASE_TAG" =~ ^v1\.0\.([0-9]+)$ ]] || { echo "tag must use v1.0.REVISION" >&2; exit 1; }
+          [[ "$RELEASE_TAG" =~ ^v2026\.1\.([0-9]+)$ ]] || { echo "tag must use v2026.1.REVISION" >&2; exit 1; }
           tag_revision="${BASH_REMATCH[1]}"
 
           run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
@@ -71,7 +71,7 @@ jobs:
       - name: Download build artifact
         uses: actions/download-artifact@v5
         with:
-          name: OmniOS-1.0-amd64
+          name: OmniOS-2026.1-amd64
           path: release
           run-id: ${{ inputs.build_run_id }}
           github-token: ${{ github.token }}
@@ -84,15 +84,15 @@ jobs:
         run: |
           cd release
           sha256sum --check SHA256SUMS
-          sha256sum --check OmniOS-1.0-amd64.iso.sha256
+          sha256sum --check OmniOS-2026.1-amd64.iso.sha256
           metadata_value() {
             awk -F= -v key="$1" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' RELEASE-METADATA
           }
           [[ "$(metadata_value source_commit)" == "$EXPECTED_SHA" ]] || { echo "Source commit mismatch" >&2; exit 1; }
           [[ "$(metadata_value workflow_run_id)" == "$EXPECTED_RUN_ID" ]] || { echo "Run ID mismatch" >&2; exit 1; }
           [[ "$(metadata_value release_revision)" == "$EXPECTED_REVISION" ]] || { echo "Revision mismatch" >&2; exit 1; }
-          [[ "$(metadata_value version)" == "1.0.$EXPECTED_REVISION" ]] || { echo "Version mismatch" >&2; exit 1; }
-          test -s OmniOS-1.0-amd64.iso
+          [[ "$(metadata_value version)" == "2026.1.$EXPECTED_REVISION" ]] || { echo "Version mismatch" >&2; exit 1; }
+          test -s OmniOS-2026.1-amd64.iso
 
       - name: Prepare public release files
         run: |

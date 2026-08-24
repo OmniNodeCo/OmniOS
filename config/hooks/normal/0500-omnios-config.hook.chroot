@@ -48,8 +48,14 @@ GRUB_DISABLE_RECOVERY=false
 GRUB
 
 systemctl enable omnios-firstboot.service
+systemctl enable omnios-antivirus-scan.timer
+systemctl enable omnios-flathub.service
 systemctl enable NetworkManager.service
 systemctl enable firewalld.service
+systemctl enable apparmor.service
+systemctl enable auditd.service
+systemctl enable clamav-daemon.service
+systemctl enable clamav-freshclam.service
 systemctl enable unattended-upgrades.service
 
 # Do not clone the build system's identity into every installation.

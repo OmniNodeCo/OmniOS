@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=OmniOS Security Center
+GenericName=Security and Recovery
+Comment=Open antivirus, firewall, password, snapshot, audit, and update tools
+Exec=/usr/libexec/omnios-security-center
+Icon=security-high
+Terminal=false
+Categories=System;Security;Settings;
+Keywords=security;antivirus;firewall;passwords;backup;audit;updates;
+StartupNotify=true

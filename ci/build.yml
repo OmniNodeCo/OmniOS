@@ -70,7 +70,7 @@ jobs:
         if: inputs.full_build
         run: |
           cd out
-          sha256sum --check OmniOS-1.0-amd64.iso.sha256
+          sha256sum --check OmniOS-2026.1-amd64.iso.sha256
 
       - name: Boot smoke test (legacy BIOS)
         if: inputs.full_build
@@ -91,7 +91,7 @@ jobs:
           source_ref=$GITHUB_REF_NAME
           workflow_run_id=$GITHUB_RUN_ID
           release_revision=$OMNIOS_RELEASE_REVISION
-          version=1.0.$OMNIOS_RELEASE_REVISION
+          version=2026.1.$OMNIOS_RELEASE_REVISION
           base=Debian_13_trixie
           architecture=amd64
           EOF
@@ -106,7 +106,7 @@ jobs:
         if: inputs.full_build
         uses: actions/upload-artifact@v4
         with:
-          name: OmniOS-1.0-amd64
+          name: OmniOS-2026.1-amd64
           path: out/
           compression-level: 0
           retention-days: 14

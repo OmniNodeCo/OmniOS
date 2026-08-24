@@ -1,0 +1,16 @@
+{
+  "policies": {
+    "DisableFirefoxStudies": true,
+    "DisableTelemetry": true,
+    "EnableTrackingProtection": {
+      "Value": true,
+      "Cryptomining": true,
+      "Fingerprinting": true,
+      "EmailTracking": true,
+      "Locked": false
+    },
+    "HTTPSOnlyMode": "enabled",
+    "OfferToSaveLogins": true,
+    "PasswordManagerEnabled": true
+  }
+}

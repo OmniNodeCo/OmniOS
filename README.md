@@ -1,6 +1,6 @@
-# OmniOS
+# OmniOS 2026.1
 
-OmniOS is a normal, installable KDE Plasma desktop operating system based on **Debian 13 Stable (trixie)**. It is built as a hybrid live ISO for 64-bit PCs and is not an Ubuntu remaster, Yocto appliance image, or development-only environment.
+OmniOS 2026.1 is a normal, installable KDE Plasma desktop operating system based on **Debian 13 Stable (trixie)**. It is built as a hybrid live ISO for 64-bit PCs and is not an Ubuntu remaster, Yocto appliance image, or development-only environment.
 
 The live session and installed system use the same package set. Users can try the desktop from USB and install it with the Calamares graphical installer.
 
@@ -10,13 +10,18 @@ The live session and installed system use the same package set. Users can try th
 - Calamares graphical installer
 - Legacy BIOS and UEFI boot
 - Debian's stable kernel, microcode, and broad PC firmware collection
-- NetworkManager, Wi-Fi, VPN, WireGuard, Bluetooth, and firewalld
-- PipeWire and WirePlumber audio
-- Firefox ESR, LibreOffice, VLC, KDE Connect, and Flatpak
-- Discover software management with Flatpak integration
-- Printing and common storage/filesystem tools
+- NetworkManager, Wi-Fi, VPN, WireGuard, Bluetooth, firewalld, and Plasma Firewall
+- PipeWire and WirePlumber audio with broad GStreamer/FFmpeg media support
+- Firefox ESR, LibreOffice, VLC, KDE Connect, and Flatpak with Flathub
+- Complete KDE utilities for documents, archives, screenshots, storage, and file sharing
+- Kup backup, Skanpage, AirScan, printing, Samba sharing, and storage diagnostics
+- Laptop power profiles and Intel thermal management
 - Automatic signed Debian security updates
 - Optional Btrfs root filesystem with Snapper snapshots and Btrfs Assistant
+- AppArmor policies, Linux auditing, hardened sysctl defaults, Lynis, and package verification
+- ClamAV daemon, automatic signature updates, ClamTK, Dolphin integration, and weekly scans
+- KeePassXC with browser integration, Kleopatra, and FIDO2/U2F tools
+- OmniOS Security Center for antivirus, firewall, passwords, snapshots, audits, and updates
 
 The first release architecture is **amd64/x86-64**. ARM64 and other architectures require separate future images.
 
@@ -27,6 +32,12 @@ OmniOS uses Debian's APT repositories and their cryptographic signatures. `unatt
 When the system is installed on Btrfs—the Calamares default—OmniOS initializes Snapper and creates paired snapshots around APT/DPKG transactions. Btrfs Assistant provides a graphical view of snapshots. A damaged installation can be recovered from a prior snapshot using the OmniOS live ISO and standard Snapper/Btrfs tools.
 
 This preserves normal Debian package management while providing practical recovery. It deliberately avoids unsigned package-download scripts.
+
+## Security and antivirus
+
+OmniOS 2026.1 enables AppArmor, auditd, firewalld, safer kernel/network defaults, Firefox tracking protection and HTTPS-only mode, automatic ClamAV definition updates, and a weekly low-priority antivirus scan while connected to AC power. Scans report suspicious files in `/var/log/omnios-antivirus.log` and never delete or quarantine user data automatically.
+
+The **OmniOS Security Center** launches the graphical antivirus, firewall, password manager, Btrfs snapshot manager, Lynis audit, and software update interfaces. Advanced controls such as USB device blocking are not enabled by default because they could unexpectedly lock out ordinary desktop hardware.
 
 ## Build requirements
 
@@ -54,10 +65,10 @@ scripts/build.sh build
 Output:
 
 ```text
-out/OmniOS-1.0-amd64.iso
-out/OmniOS-1.0-amd64.iso.sha256
-out/OmniOS-1.0-amd64.packages
-out/OmniOS-1.0-amd64.iso-info.txt
+out/OmniOS-2026.1-amd64.iso
+out/OmniOS-2026.1-amd64.iso.sha256
+out/OmniOS-2026.1-amd64.packages
+out/OmniOS-2026.1-amd64.iso-info.txt
 ```
 
 The Debian package download cache is retained under `build/downloads/`. Do not use `scripts/build.sh clean --purge-cache` unless the cache itself is damaged.
@@ -67,7 +78,7 @@ The Debian package download cache is retained under `build/downloads/`. Do not u
 **Flashing destroys the selected device. Verify its path carefully.**
 
 ```bash
-sudo dd if=out/OmniOS-1.0-amd64.iso of=/dev/sdX \
+sudo dd if=out/OmniOS-2026.1-amd64.iso of=/dev/sdX \
   bs=16M oflag=direct status=progress conv=fsync
 ```
 

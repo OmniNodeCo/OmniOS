@@ -9,6 +9,10 @@ rm -f /usr/share/applications/install-omnios.desktop \
 find /home -mindepth 3 -maxdepth 3 -type f \
     -path '*/Desktop/install-omnios.desktop' -delete 2>/dev/null || true
 
+if systemctl is-active --quiet firewalld.service; then
+    firewall-cmd --set-default-zone=public
+fi
+
 if [[ "$(findmnt --noheadings --output FSTYPE /)" == btrfs ]]; then
     if ! snapper --config root get-config >/dev/null 2>&1; then
         snapper --config root create-config /
