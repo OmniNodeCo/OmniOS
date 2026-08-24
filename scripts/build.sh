@@ -39,7 +39,9 @@ prepare_workspace() {
     fi
     mkdir -p "$WORK_DIR"
     cp -a "$ROOT/auto" "$ROOT/config" "$WORK_DIR/"
-    ln -s ../cache "$WORK_DIR/cache"
+    local relative_cache
+    relative_cache="$(realpath --relative-to="$WORK_DIR" "$CACHE_DIR")"
+    ln -s "$relative_cache" "$WORK_DIR/cache"
 }
 
 prepare_bootloader_branding() {
