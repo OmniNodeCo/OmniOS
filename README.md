@@ -137,7 +137,7 @@ git commit -m "ci: install Debian ISO workflows"
 git push
 ```
 
-The build workflow caches downloaded Debian packages, builds inside `debian:13-slim`, verifies the ISO checksum, optionally tests BIOS and UEFI boot when selected, and uploads the artifact. The release workflow verifies the source run and checksums, creates GitHub provenance attestations, and publishes the ISO.
+The build workflow caches downloaded Debian packages, builds inside `debian:13-slim`, verifies the ISO checksum, optionally tests BIOS and UEFI boot when selected, and uploads the artifact. The release workflow verifies the source run and checksums, generates release notes from the matching section of `CHANGELOG.md`, creates GitHub provenance attestations, and publishes the ISO with its changelog.
 
 ## Release engineering
 

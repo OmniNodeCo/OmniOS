@@ -95,12 +95,16 @@ jobs:
           test -s OmniOS-2026.1-amd64.iso
 
       - name: Prepare public release files
+        env:
+          SOURCE_SHA: ${{ steps.source.outputs.sha }}
         run: |
           mkdir -p publish
           find release -maxdepth 1 -type f \
             \( -name 'OmniOS-*.iso' -o -name 'OmniOS-*.iso.sha256' \
             -o -name 'OmniOS-*.packages' -o -name 'OmniOS-*.iso-info.txt' \
             -o -name 'RELEASE-METADATA' \) -exec cp {} publish/ \;
+          git show "${SOURCE_SHA}:CHANGELOG.md" > publish/CHANGELOG.md
+          test -s publish/CHANGELOG.md
           (cd publish && sha256sum * > SHA256SUMS)
           ls -lh publish
 
@@ -118,8 +122,24 @@ jobs:
           SOURCE_RUN_ID: ${{ inputs.build_run_id }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
+          changelog_version="${RELEASE_TAG#v}"
+          changelog_version="${changelog_version%.*}"
+          awk -v heading="## [$changelog_version]" '
+              index($0, heading) == 1 { found = 1; next }
+              found && /^## \[/ { exit }
+              found { print }
+              END { if (!found) exit 1 }
+          ' publish/CHANGELOG.md > release-changes.md
+          test -s release-changes.md
+
           cat > release-notes.md <<EOF
-          OmniOS ${RELEASE_TAG#v} is a Debian 13-based KDE Plasma live and installation ISO for x86-64 PCs.
+          # OmniOS ${RELEASE_TAG#v}
+
+          EOF
+          cat release-changes.md >> release-notes.md
+          cat >> release-notes.md <<EOF
+
+          ## Release provenance
 
           - Source commit: \`$SOURCE_SHA\`
           - Source branch: \`$SOURCE_BRANCH\`
