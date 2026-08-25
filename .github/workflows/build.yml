@@ -1,85 +1,117 @@
-name: Build OmniOS Yocto Image
+name: Build OmniOS ISO
+
 on:
   workflow_dispatch:
     inputs:
       full_build:
-        description: Build the complete KDE Plasma disk image
+        description: Build the complete OmniOS ISO
         required: true
         default: true
         type: boolean
+      run_boot_tests:
+        description: Run the BIOS and UEFI QEMU boot tests
+        required: true
+        default: false
+        type: boolean
+      release_revision:
+        description: Monotonic release revision used by the release workflow
+        required: true
+        default: "0"
+        type: string
+
 permissions:
   contents: read
+
 concurrency:
-  group: omnios-yocto-x86-64
+  group: omnios-debian-iso
   cancel-in-progress: false
+
 jobs:
   build:
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    timeout-minutes: 240
+
     steps:
       - name: Check out OmniOS
         uses: actions/checkout@v5
+
+      - name: Validate release revision
+        env:
+          RELEASE_REVISION: ${{ inputs.release_revision }}
+        run: |
+          [[ "$RELEASE_REVISION" =~ ^[0-9]+$ ]] || {
+            echo "release_revision must contain digits only" >&2
+            exit 1
+          }
+          echo "OMNIOS_RELEASE_REVISION=$RELEASE_REVISION" >> "$GITHUB_ENV"
+
       - name: Free runner disk space
         run: |
-          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /opt/hostedtoolcache/CodeQL || true
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc \
+            /opt/hostedtoolcache/CodeQL || true
           sudo apt-get clean
           df -h /
-      - name: Install Yocto host tools
+
+      - name: Install validation and QEMU tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes build-essential chrpath cpio debianutils diffstat file gawk gcc git \
-            iputils-ping libacl1 liblz4-tool locales python3 python3-git python3-jinja2 \
-            python3-pexpect python3-pip python3-subunit python3-venv ovmf qemu-system-x86 \
-            socat texinfo unzip wget xz-utils zstd
-          python3 -m venv .venv
-          .venv/bin/pip install kas==5.5 shellcheck-py
-          echo "$GITHUB_WORKSPACE/.venv/bin" >> "$GITHUB_PATH"
-          sudo locale-gen en_US.UTF-8
-      - name: Validate project
-        run: scripts/check-layer.sh
-      - name: Restore Yocto downloads
+          sudo apt-get install --yes desktop-file-utils ovmf qemu-system-x86 shellcheck
+
+      - name: Validate OmniOS configuration
+        run: scripts/check-project.sh
+
+      - name: Restore Debian package cache
         uses: actions/cache@v5
         with:
           path: build/downloads
-          key: omnios-wrynose-downloads-${{ hashFiles('kas/*.yml', 'meta-omnios/**/*.bb*') }}
-          restore-keys: omnios-wrynose-downloads-
-      - name: Check out pinned layers
-        run: scripts/build.sh checkout
-      - name: Parse metadata
-        run: scripts/build.sh parse
-      - name: Create ephemeral CI update signer
+          key: omnios-debian13-${{ hashFiles('auto/**', 'config/package-lists/**', 'config/hooks/**') }}
+          restore-keys: omnios-debian13-
+
+      - name: Build Debian 13 KDE live/install ISO
         if: inputs.full_build
-        run: scripts/generate-rauc-keys.sh
-      - name: Build image and signed bundle
+        run: scripts/build-container.sh
+
+      - name: Verify ISO checksum
         if: inputs.full_build
-        run: scripts/build.sh build
-      - name: Generate RPM repository metadata
-        if: inputs.full_build
-        run: scripts/build.sh feed
+        run: |
+          cd out
+          sha256sum --check OmniOS-2026.1-amd64.iso.sha256
+
       - name: Boot smoke test (legacy BIOS)
-        if: inputs.full_build
+        if: inputs.full_build && inputs.run_boot_tests
         run: scripts/smoke-test.sh
+
       - name: Boot smoke test (UEFI)
-        if: inputs.full_build
+        if: inputs.full_build && inputs.run_boot_tests
         env:
           QEMU_UEFI: "1"
         run: scripts/smoke-test.sh
-      - name: Collect release artifacts
+
+      - name: Finalize release metadata
         if: inputs.full_build
         run: |
-          mkdir -p out
-          rm -f out/*.wic out/OVMF*.fd
-          find build/tmp/deploy/images/genericx86-64 -maxdepth 1 -type f \
-            \( -name 'omnios-plasma-image*.wic.zst' -o -name 'omnios-plasma-image*.wic.bmap' \
-            -o -name 'omnios-plasma-image*.manifest' -o -name 'omnios-update-bundle*.raucb' \
-            -o -name 'bzImage*' \) -exec cp -L {} out/ \;
-          (cd out && sha256sum * > SHA256SUMS)
+          rm -f out/OVMF*.fd
+          cat > out/RELEASE-METADATA <<EOF
+          source_commit=$GITHUB_SHA
+          source_ref=$GITHUB_REF_NAME
+          workflow_run_id=$GITHUB_RUN_ID
+          release_revision=$OMNIOS_RELEASE_REVISION
+          version=2026.1.$OMNIOS_RELEASE_REVISION
+          base=Debian_13_trixie
+          architecture=amd64
+          EOF
+          (
+            cd out
+            find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%f\n' \
+              | sort | xargs sha256sum > SHA256SUMS
+          )
           ls -lh out
-      - name: Upload OmniOS image
+
+      - name: Upload OmniOS ISO
         if: inputs.full_build
         uses: actions/upload-artifact@v4
         with:
-          name: OmniOS-1.0-x86_64
+          name: OmniOS-2026.1-amd64
           path: out/
           compression-level: 0
           retention-days: 14
