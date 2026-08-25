@@ -2,26 +2,9 @@ name: Release OmniOS ISO
 
 on:
   workflow_dispatch:
-    inputs:
-      build_run_id:
-        description: Successful Build OmniOS ISO workflow run ID
-        required: true
-        type: string
-      tag:
-        description: Release tag matching the build revision (for example v2026.1.7)
-        required: true
-        type: string
-      prerelease:
-        description: Publish as a prerelease
-        required: true
-        default: false
-        type: boolean
 
 permissions:
-  actions: read
   contents: write
-  id-token: write
-  attestations: write
 
 concurrency:
   group: omnios-release
@@ -30,130 +13,90 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    environment: production
-    timeout-minutes: 30
+    timeout-minutes: 10
 
     steps:
-      - name: Check out release metadata
+      - name: Check out OmniOS
         uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
 
-      - name: Validate source build
-        id: source
+      - name: Read OmniOS version and nightly URL
+        id: release
         env:
           GH_TOKEN: ${{ github.token }}
-          RUN_ID: ${{ inputs.build_run_id }}
-          RELEASE_TAG: ${{ inputs.tag }}
         run: |
-          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || { echo "build_run_id must contain digits only" >&2; exit 1; }
-          [[ "$RELEASE_TAG" =~ ^v2026\.1\.([0-9]+)$ ]] || { echo "tag must use v2026.1.REVISION" >&2; exit 1; }
-          tag_revision="${BASH_REMATCH[1]}"
-
-          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID")"
-          [[ "$(jq -r '.conclusion' <<<"$run_json")" == success ]] || { echo "Build did not succeed" >&2; exit 1; }
-          [[ "$(jq -r '.name' <<<"$run_json")" == "Build OmniOS ISO" ]] || { echo "Unexpected source workflow" >&2; exit 1; }
-          source_sha="$(jq -r '.head_sha' <<<"$run_json")"
-          source_branch="$(jq -r '.head_branch' <<<"$run_json")"
-          source_repository="$(jq -r '.head_repository.full_name' <<<"$run_json")"
-          default_branch="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.default_branch')"
-          [[ "$source_repository" == "$GITHUB_REPOSITORY" ]] || { echo "Cross-repository artifacts are forbidden" >&2; exit 1; }
-          [[ "$source_branch" == "$default_branch" ]] || { echo "Release must come from $default_branch" >&2; exit 1; }
-          [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || { echo "Invalid source commit" >&2; exit 1; }
-          if git ls-remote --exit-code --tags origin "refs/tags/$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "Tag already exists: $RELEASE_TAG" >&2
+          identity_file=config/includes.chroot/usr/share/omnios/identity/os-release
+          version="$(awk -F= '$1 == "VERSION_ID" { value=$2; gsub(/^"|"$/, "", value); print value; exit }' "$identity_file")"
+          [[ "$version" =~ ^[0-9]{4}\.[0-9]+(\.[0-9]+)?$ ]] || {
+            echo "Invalid or missing VERSION_ID in $identity_file: $version" >&2
             exit 1
-          fi
-          echo "sha=$source_sha" >> "$GITHUB_OUTPUT"
-          echo "branch=$source_branch" >> "$GITHUB_OUTPUT"
-          echo "revision=$tag_revision" >> "$GITHUB_OUTPUT"
-
-      - name: Download build artifact
-        uses: actions/download-artifact@v5
-        with:
-          name: OmniOS-2026.1-amd64
-          path: release
-          run-id: ${{ inputs.build_run_id }}
-          github-token: ${{ github.token }}
-
-      - name: Verify ISO and metadata
-        env:
-          EXPECTED_SHA: ${{ steps.source.outputs.sha }}
-          EXPECTED_REVISION: ${{ steps.source.outputs.revision }}
-          EXPECTED_RUN_ID: ${{ inputs.build_run_id }}
-        run: |
-          cd release
-          sha256sum --check SHA256SUMS
-          sha256sum --check OmniOS-2026.1-amd64.iso.sha256
-          metadata_value() {
-            awk -F= -v key="$1" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' RELEASE-METADATA
           }
-          [[ "$(metadata_value source_commit)" == "$EXPECTED_SHA" ]] || { echo "Source commit mismatch" >&2; exit 1; }
-          [[ "$(metadata_value workflow_run_id)" == "$EXPECTED_RUN_ID" ]] || { echo "Run ID mismatch" >&2; exit 1; }
-          [[ "$(metadata_value release_revision)" == "$EXPECTED_REVISION" ]] || { echo "Revision mismatch" >&2; exit 1; }
-          [[ "$(metadata_value version)" == "2026.1.$EXPECTED_REVISION" ]] || { echo "Version mismatch" >&2; exit 1; }
-          test -s OmniOS-2026.1-amd64.iso
 
-      - name: Prepare public release files
+          default_branch="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.default_branch')"
+          encoded_branch="$(jq -rn --arg value "$default_branch" '$value | @uri')"
+          artifact_name="OmniOS-${version}-amd64"
+          nightly_url="https://nightly.link/${GITHUB_REPOSITORY}/workflows/build/${encoded_branch}/${artifact_name}.zip"
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$version" >> "$GITHUB_OUTPUT"
+          echo "branch=$default_branch" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
+          echo "nightly_url=$nightly_url" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
         env:
-          SOURCE_SHA: ${{ steps.source.outputs.sha }}
+          VERSION: ${{ steps.release.outputs.version }}
+          NIGHTLY_URL: ${{ steps.release.outputs.nightly_url }}
+          ARTIFACT_NAME: ${{ steps.release.outputs.artifact_name }}
+          NIGHTLY_BRANCH: ${{ steps.release.outputs.branch }}
         run: |
-          mkdir -p publish
-          find release -maxdepth 1 -type f \
-            \( -name 'OmniOS-*.iso' -o -name 'OmniOS-*.iso.sha256' \
-            -o -name 'OmniOS-*.packages' -o -name 'OmniOS-*.iso-info.txt' \
-            -o -name 'RELEASE-METADATA' \) -exec cp {} publish/ \;
-          git show "${SOURCE_SHA}:CHANGELOG.md" > publish/CHANGELOG.md
-          test -s publish/CHANGELOG.md
-          (cd publish && sha256sum * > SHA256SUMS)
-          ls -lh publish
-
-      - name: Attest release provenance
-        uses: actions/attest-build-provenance@v3
-        with:
-          subject-path: publish/*
-
-      - name: Publish GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.tag }}
-          SOURCE_SHA: ${{ steps.source.outputs.sha }}
-          SOURCE_BRANCH: ${{ steps.source.outputs.branch }}
-          SOURCE_RUN_ID: ${{ inputs.build_run_id }}
-          PRERELEASE: ${{ inputs.prerelease }}
-        run: |
-          changelog_version="${RELEASE_TAG#v}"
-          changelog_version="${changelog_version%.*}"
-          awk -v heading="## [$changelog_version]" '
+          awk -v heading="## [$VERSION]" '
               index($0, heading) == 1 { found = 1; next }
               found && /^## \[/ { exit }
               found { print }
               END { if (!found) exit 1 }
-          ' publish/CHANGELOG.md > release-changes.md
+          ' CHANGELOG.md > release-changes.md
           test -s release-changes.md
 
           cat > release-notes.md <<EOF
-          # OmniOS ${RELEASE_TAG#v}
+          # OmniOS $VERSION
 
           EOF
           cat release-changes.md >> release-notes.md
           cat >> release-notes.md <<EOF
 
-          ## Release provenance
+          ## Download
 
-          - Source commit: \`$SOURCE_SHA\`
-          - Source branch: \`$SOURCE_BRANCH\`
-          - Build run: https://github.com/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID
-          - Boot support: legacy BIOS and UEFI
-          - Installer: Calamares
+          [Download the latest OmniOS $VERSION ISO artifact (ZIP)]($NIGHTLY_URL)
 
-          Verify downloads using \`SHA256SUMS\` and GitHub artifact attestations before flashing.
+          The ZIP contains \`${ARTIFACT_NAME}.iso\`, its SHA-256 checksum, the package manifest, and ISO metadata from the latest successful **Build OmniOS ISO** workflow on \`$NIGHTLY_BRANCH\`.
+
+          The nightly link always follows the newest successful build for this version. Verify the extracted ISO with \`${ARTIFACT_NAME}.iso.sha256\` before flashing it.
+
+          ## Source
+
+          - Release commit: \`$GITHUB_SHA\`
+          - Architecture: amd64/x86-64
+          - Base: Debian 13 Stable (trixie)
           EOF
-          release_flags=()
-          [[ "$PRERELEASE" == true ]] && release_flags+=(--prerelease)
-          gh release create "$RELEASE_TAG" publish/* \
-            --repo "$GITHUB_REPOSITORY" \
-            --target "$SOURCE_SHA" \
-            --title "OmniOS ${RELEASE_TAG#v}" \
-            --notes-file release-notes.md \
-            "${release_flags[@]}"
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "OmniOS v$VERSION" \
+              --notes-file release-notes.md \
+              --latest
+          else
+            gh release create "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "OmniOS v$VERSION" \
+              --notes-file release-notes.md \
+              --latest
+          fi
