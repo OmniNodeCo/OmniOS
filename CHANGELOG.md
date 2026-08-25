@@ -70,8 +70,8 @@ OmniOS Desktop 2026.1 is the first consumer desktop release in the year-based re
 - Added automatic ISO boot-menu timeouts for unattended BIOS and UEFI testing.
 - Added optional QEMU BIOS and UEFI smoke tests in the build workflow template.
 - Added SHA-256 checksums, package manifests, ISO metadata, release metadata, and versioned artifacts.
-- Added workflow templates for cached ISO builds, artifact upload, provenance attestation, and GitHub releases.
-- Added changelog-derived GitHub release notes plus a permanent nightly.link download in build summaries, artifact metadata, and releases.
+- Added workflow templates for cached ISO builds, artifact upload, and GitHub releases sourced from the latest successful build.
+- Added nightly links to build summaries and metadata, while releases resolve the newest successful `build.yml` artifact directly through GitHub Actions.
 
 ### Fixed
 

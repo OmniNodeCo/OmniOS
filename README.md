@@ -148,7 +148,7 @@ git commit -m "ci: install Debian ISO workflows"
 git push
 ```
 
-The build workflow reads `version.txt`, uses it for the ISO and artifact ZIP names, caches downloaded Debian packages, builds inside `debian:13-slim`, verifies the ISO checksum, optionally tests BIOS and UEFI boot, and publishes the permanent nightly.link URL in the job summary and artifact metadata. The release workflow uses the same version file to create or update the matching GitHub release, generates its notes from `CHANGELOG.md`, and provides the latest successful ISO artifact ZIP download.
+The build workflow reads `version.txt`, uses it for the ISO and artifact ZIP names, caches downloaded Debian packages, builds inside `debian:13-slim`, verifies the ISO checksum, optionally tests BIOS and UEFI boot, and publishes the nightly.link URL in the job summary and artifact metadata. The release workflow finds the latest successful `build.yml` run on the default branch, reads that build commit's `version.txt` and changelog, and links the release directly to its version-matched GitHub Actions artifact. Build artifacts are retained for 90 days.
 
 ## Release engineering
 
@@ -159,7 +159,7 @@ Before a public release:
 3. install on representative Intel and AMD hardware;
 4. test Wi-Fi, Bluetooth, sound, suspend/resume, graphics, and disk encryption;
 5. test a Btrfs snapshot and recovery procedure;
-6. confirm the checksum, package manifest, and nightly download link are available.
+6. confirm the checksum, package manifest, and direct build-artifact download are available.
 
 ## Licensing
 

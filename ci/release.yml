@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -18,38 +19,76 @@ jobs:
     steps:
       - name: Check out OmniOS
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
-      - name: Read OmniOS version and nightly URL
-        id: release
+      - name: Resolve latest successful build
+        id: build
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="$(scripts/read-version.sh)"
-
           default_branch="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.default_branch')"
-          encoded_branch="$(jq -rn --arg value "$default_branch" '$value | @uri')"
+          runs_json="$(gh api --method GET \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" \
+            -f branch="$default_branch" \
+            -f status=success \
+            -f per_page=20)"
+          run_id="$(jq -r '.workflow_runs[0].id // empty' <<< "$runs_json")"
+          source_sha="$(jq -r '.workflow_runs[0].head_sha // empty' <<< "$runs_json")"
+          [[ "$run_id" =~ ^[0-9]+$ && "$source_sha" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "No successful build.yml run was found on $default_branch" >&2
+            exit 1
+          }
+
+          git cat-file -e "$source_sha^{commit}"
+          git show "$source_sha:version.txt" > build-version.txt
+          version="$(scripts/read-version.sh build-version.txt)"
           artifact_name="OmniOS-${version}-amd64"
-          nightly_url="https://nightly.link/${GITHUB_REPOSITORY}/workflows/build/${encoded_branch}/${artifact_name}.zip"
+
+          artifacts_json="$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts")"
+          artifact_id="$(jq -r --arg name "$artifact_name" \
+            '[.artifacts[] | select(.name == $name and .expired == false)][0].id // empty' \
+            <<< "$artifacts_json")"
+          artifact_size="$(jq -r --arg name "$artifact_name" \
+            '[.artifacts[] | select(.name == $name and .expired == false)][0].size_in_bytes // empty' \
+            <<< "$artifacts_json")"
+          [[ "$artifact_id" =~ ^[0-9]+$ && "$artifact_size" =~ ^[0-9]+$ ]] || {
+            echo "Run $run_id has no unexpired $artifact_name artifact" >&2
+            exit 1
+          }
+
+          artifact_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts/$artifact_id"
+          run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$run_id"
+          artifact_size_display="$(numfmt --to=iec-i --suffix=B "$artifact_size")"
 
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "tag=$version" >> "$GITHUB_OUTPUT"
-          echo "branch=$default_branch" >> "$GITHUB_OUTPUT"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
           echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
-          echo "nightly_url=$nightly_url" >> "$GITHUB_OUTPUT"
+          echo "artifact_id=$artifact_id" >> "$GITHUB_OUTPUT"
+          echo "artifact_url=$artifact_url" >> "$GITHUB_OUTPUT"
+          echo "artifact_size=$artifact_size_display" >> "$GITHUB_OUTPUT"
 
       - name: Generate release notes
         env:
-          VERSION: ${{ steps.release.outputs.version }}
-          NIGHTLY_URL: ${{ steps.release.outputs.nightly_url }}
-          ARTIFACT_NAME: ${{ steps.release.outputs.artifact_name }}
-          NIGHTLY_BRANCH: ${{ steps.release.outputs.branch }}
+          VERSION: ${{ steps.build.outputs.version }}
+          BUILD_SHA: ${{ steps.build.outputs.source_sha }}
+          BUILD_RUN_ID: ${{ steps.build.outputs.run_id }}
+          BUILD_RUN_URL: ${{ steps.build.outputs.run_url }}
+          ARTIFACT_NAME: ${{ steps.build.outputs.artifact_name }}
+          ARTIFACT_URL: ${{ steps.build.outputs.artifact_url }}
+          ARTIFACT_SIZE: ${{ steps.build.outputs.artifact_size }}
         run: |
+          git show "$BUILD_SHA:CHANGELOG.md" > build-changelog.md
           awk -v heading="## [$VERSION]" '
               index($0, heading) == 1 { found = 1; next }
               found && /^## \[/ { exit }
               found { print }
               END { if (!found) exit 1 }
-          ' CHANGELOG.md > release-changes.md
+          ' build-changelog.md > release-changes.md
           test -s release-changes.md
 
           cat > release-notes.md <<EOF
@@ -61,15 +100,14 @@ jobs:
 
           ## Download
 
-          [Download the latest OmniOS $VERSION ISO artifact (ZIP)]($NIGHTLY_URL)
+          [Download ${ARTIFACT_NAME}.zip from the latest successful build]($ARTIFACT_URL) ($ARTIFACT_SIZE)
 
-          The ZIP contains \`${ARTIFACT_NAME}.iso\`, its SHA-256 checksum, the package manifest, and ISO metadata from the latest successful **Build OmniOS ISO** workflow on \`$NIGHTLY_BRANCH\`.
+          The build artifact contains \`${ARTIFACT_NAME}.iso\`, its SHA-256 checksum, the package manifest, build metadata, and ISO metadata. GitHub requires users to sign in before downloading Actions artifacts.
 
-          The nightly link always follows the newest successful build for this version. Verify the extracted ISO with \`${ARTIFACT_NAME}.iso.sha256\` before flashing it.
+          ## Build source
 
-          ## Source
-
-          - Release commit: \`$GITHUB_SHA\`
+          - Build run: [$BUILD_RUN_ID]($BUILD_RUN_URL)
+          - Source commit: \`$BUILD_SHA\`
           - Architecture: amd64/x86-64
           - Base: Debian 13 Stable (trixie)
           EOF
@@ -77,20 +115,21 @@ jobs:
       - name: Create or update GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.release.outputs.version }}
-          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.build.outputs.version }}
+          RELEASE_TAG: ${{ steps.build.outputs.tag }}
+          BUILD_SHA: ${{ steps.build.outputs.source_sha }}
         run: |
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
+              --target "$BUILD_SHA" \
               --title "OmniOS v$VERSION" \
               --notes-file release-notes.md \
               --latest
           else
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
+              --target "$BUILD_SHA" \
               --title "OmniOS v$VERSION" \
               --notes-file release-notes.md \
               --latest
