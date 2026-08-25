@@ -8,10 +8,10 @@ windowPlacement: center
 strings:
     productName:         OmniOS
     shortProductName:    OmniOS
-    version: "2026.1"
-    shortVersion: "2026.1"
-    versionedName:       OmniOS 2026.1
-    shortVersionedName:  OmniOS 2026.1
+    version: "@OMNIOS_VERSION@"
+    shortVersion: "@OMNIOS_VERSION@"
+    versionedName:       OmniOS @OMNIOS_VERSION@
+    shortVersionedName:  OmniOS @OMNIOS_VERSION@
     bootloaderEntryName: OmniOS
     productUrl:          https://github.com/OmniNodeCo/OmniOS
     supportUrl:          https://github.com/OmniNodeCo/OmniOS/issues

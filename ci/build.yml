@@ -13,11 +13,6 @@ on:
         required: true
         default: false
         type: boolean
-      release_revision:
-        description: Monotonic release revision used by the release workflow
-        required: true
-        default: "0"
-        type: string
 
 permissions:
   contents: read
@@ -35,15 +30,16 @@ jobs:
       - name: Check out OmniOS
         uses: actions/checkout@v5
 
-      - name: Validate release revision
-        env:
-          RELEASE_REVISION: ${{ inputs.release_revision }}
+      - name: Configure version and nightly download
         run: |
-          [[ "$RELEASE_REVISION" =~ ^[0-9]+$ ]] || {
-            echo "release_revision must contain digits only" >&2
-            exit 1
-          }
-          echo "OMNIOS_RELEASE_REVISION=$RELEASE_REVISION" >> "$GITHUB_ENV"
+          version="$(scripts/read-version.sh)"
+          artifact_name="OmniOS-${version}-amd64"
+          encoded_ref="$(jq -rn --arg value "$GITHUB_REF_NAME" '$value | @uri')"
+          nightly_url="https://nightly.link/${GITHUB_REPOSITORY}/workflows/build/${encoded_ref}/${artifact_name}.zip"
+
+          echo "OMNIOS_VERSION=$version" >> "$GITHUB_ENV"
+          echo "OMNIOS_ARTIFACT=$artifact_name" >> "$GITHUB_ENV"
+          echo "OMNIOS_NIGHTLY_URL=$nightly_url" >> "$GITHUB_ENV"
 
       - name: Free runner disk space
         run: |
@@ -64,7 +60,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: build/downloads
-          key: omnios-debian13-${{ hashFiles('auto/**', 'config/package-lists/**', 'config/hooks/**') }}
+          key: omnios-debian13-${{ hashFiles('version.txt', 'auto/**', 'config/package-lists/**', 'config/hooks/**') }}
           restore-keys: omnios-debian13-
 
       - name: Build Debian 13 KDE live/install ISO
@@ -75,7 +71,7 @@ jobs:
         if: inputs.full_build
         run: |
           cd out
-          sha256sum --check OmniOS-2026.1-amd64.iso.sha256
+          sha256sum --check "$OMNIOS_ARTIFACT.iso.sha256"
 
       - name: Boot smoke test (legacy BIOS)
         if: inputs.full_build && inputs.run_boot_tests
@@ -87,16 +83,19 @@ jobs:
           QEMU_UEFI: "1"
         run: scripts/smoke-test.sh
 
-      - name: Finalize release metadata
+      - name: Finalize build metadata
         if: inputs.full_build
         run: |
           rm -f out/OVMF*.fd
+          cp version.txt out/VERSION.txt
+          printf '%s\n' "$OMNIOS_NIGHTLY_URL" > out/NIGHTLY-LINK.txt
           cat > out/RELEASE-METADATA <<EOF
           source_commit=$GITHUB_SHA
           source_ref=$GITHUB_REF_NAME
           workflow_run_id=$GITHUB_RUN_ID
-          release_revision=$OMNIOS_RELEASE_REVISION
-          version=2026.1.$OMNIOS_RELEASE_REVISION
+          version=$OMNIOS_VERSION
+          artifact=$OMNIOS_ARTIFACT
+          nightly_url=$OMNIOS_NIGHTLY_URL
           base=Debian_13_trixie
           architecture=amd64
           EOF
@@ -107,12 +106,23 @@ jobs:
           )
           ls -lh out
 
-      - name: Upload OmniOS ISO
+      - name: Upload versioned OmniOS ISO
         if: inputs.full_build
         uses: actions/upload-artifact@v4
         with:
-          name: OmniOS-2026.1-amd64
+          name: ${{ env.OMNIOS_ARTIFACT }}
           path: out/
           compression-level: 0
           retention-days: 14
           if-no-files-found: error
+
+      - name: Show nightly download
+        if: inputs.full_build
+        run: |
+          {
+            echo '## OmniOS nightly download'
+            echo
+            echo "[$OMNIOS_ARTIFACT.zip]($OMNIOS_NIGHTLY_URL)"
+            echo
+            echo "Version source: \`version.txt\` (\`$OMNIOS_VERSION\`)"
+          } >> "$GITHUB_STEP_SUMMARY"

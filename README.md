@@ -41,6 +41,16 @@ OmniOS 2026.1 enables AppArmor, auditd, firewalld, safer kernel/network defaults
 
 The **OmniOS Security Center** launches the graphical antivirus, firewall, password manager, Btrfs snapshot manager, Lynis audit, and software update interfaces. Advanced controls such as USB device blocking are not enabled by default because they could unexpectedly lock out ordinary desktop hardware.
 
+## Versioning
+
+`version.txt` is the single source of truth for the OmniOS version. It contains one simple value such as:
+
+```text
+2026.1
+```
+
+Changing that value updates the generated OS identity, Calamares branding, ISO volume label, ISO filename, GitHub artifact ZIP name, QEMU defaults, release tag, and nightly download link. Add a matching `CHANGELOG.md` section before publishing a new version.
+
 ## Build requirements
 
 The recommended build runs inside a privileged Debian 13 container so the host distribution does not affect live-build:
@@ -64,7 +74,7 @@ scripts/bootstrap-host.sh
 scripts/build.sh build
 ```
 
-Output:
+With `version.txt` set to `2026.1`, the output is:
 
 ```text
 out/OmniOS-2026.1-amd64.iso
@@ -112,6 +122,7 @@ QEMU_UEFI=1 scripts/smoke-test.sh
 ## Customization layout
 
 ```text
+version.txt                     canonical OmniOS version and artifact name
 auto/                           reproducible live-build configuration
 config/package-lists/           Debian desktop, firmware, and utility packages
 config/includes.chroot/         files placed in the live and installed system
@@ -137,18 +148,18 @@ git commit -m "ci: install Debian ISO workflows"
 git push
 ```
 
-The build workflow caches downloaded Debian packages, builds inside `debian:13-slim`, verifies the ISO checksum, optionally tests BIOS and UEFI boot when selected, and uploads the artifact. The release workflow reads `VERSION_ID` from the OmniOS identity file, creates or updates the matching GitHub release, generates its notes from `CHANGELOG.md`, and provides a permanent nightly.link download for the newest successful ISO artifact ZIP on the default branch.
+The build workflow reads `version.txt`, uses it for the ISO and artifact ZIP names, caches downloaded Debian packages, builds inside `debian:13-slim`, verifies the ISO checksum, optionally tests BIOS and UEFI boot, and publishes the permanent nightly.link URL in the job summary and artifact metadata. The release workflow uses the same version file to create or update the matching GitHub release, generates its notes from `CHANGELOG.md`, and provides the latest successful ISO artifact ZIP download.
 
 ## Release engineering
 
 Before a public release:
 
-1. build from the default branch with a monotonically increasing revision;
-2. pass BIOS and UEFI smoke tests;
+1. update `version.txt` and add its matching `CHANGELOG.md` section;
+2. build from the default branch and pass BIOS and UEFI smoke tests;
 3. install on representative Intel and AMD hardware;
 4. test Wi-Fi, Bluetooth, sound, suspend/resume, graphics, and disk encryption;
 5. test a Btrfs snapshot and recovery procedure;
-6. publish the ISO checksum, package manifest, and provenance attestation.
+6. confirm the checksum, package manifest, and nightly download link are available.
 
 ## Licensing
 

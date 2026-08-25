@@ -24,12 +24,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          identity_file=config/includes.chroot/usr/share/omnios/identity/os-release
-          version="$(awk -F= '$1 == "VERSION_ID" { value=$2; gsub(/^"|"$/, "", value); print value; exit }' "$identity_file")"
-          [[ "$version" =~ ^[0-9]{4}\.[0-9]+(\.[0-9]+)?$ ]] || {
-            echo "Invalid or missing VERSION_ID in $identity_file: $version" >&2
-            exit 1
-          }
+          version="$(scripts/read-version.sh)"
 
           default_branch="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.default_branch')"
           encoded_branch="$(jq -rn --arg value "$default_branch" '$value | @uri')"

@@ -1,6 +1,13 @@
 #!/bin/sh
 set -eu
 
+ROOT=$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)
+VERSION=$(tr -d '[:space:]' < "$ROOT/version.txt")
+printf '%s' "$VERSION" | grep -Eq '^[0-9]{4}\.[0-9]+(\.[0-9]+)?$' || {
+    echo 'ERROR: invalid OmniOS version in version.txt' >&2
+    exit 1
+}
+
 lb config noauto \
     --mode debian \
     --system live \
@@ -33,6 +40,6 @@ lb config noauto \
     --image-name omnios \
     --iso-application "OmniOS Desktop" \
     --iso-publisher "OmniNodeCo; https://github.com/OmniNodeCo/OmniOS" \
-    --iso-volume "OmniOS 2026.1 amd64" \
+    --iso-volume "OmniOS $VERSION amd64" \
     --bootappend-live "boot=live components quiet splash username=omnios hostname=omnios locales=en_US.UTF-8 keyboard-layouts=us timezone=Etc/UTC console=ttyS0,115200 console=tty0" \
     "$@"

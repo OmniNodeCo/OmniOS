@@ -2,7 +2,8 @@
 set -Eeuo pipefail
 
 ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-ISO="${1:-$ROOT/out/OmniOS-2026.1-amd64.iso}"
+VERSION="$("$ROOT/scripts/read-version.sh")"
+ISO="${1:-$ROOT/out/OmniOS-$VERSION-amd64.iso}"
 [[ -f "$ISO" ]] || { echo "ERROR: ISO not found: $ISO" >&2; exit 1; }
 command -v qemu-system-x86_64 >/dev/null || { echo 'ERROR: qemu-system-x86_64 is required.' >&2; exit 1; }
 

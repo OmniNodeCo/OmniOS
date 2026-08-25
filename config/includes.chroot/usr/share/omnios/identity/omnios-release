@@ -1,4 +1,4 @@
-OmniOS 2026.1 (Origin)
+OmniOS @OMNIOS_VERSION@ (Origin)
 BASE=Debian 13 (trixie)
 ARCHITECTURE=amd64
 DESKTOP=KDE Plasma

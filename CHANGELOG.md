@@ -64,13 +64,14 @@ OmniOS Desktop 2026.1 is the first consumer desktop release in the year-based re
 
 - Replaced the former Yocto appliance build with Debian `live-build`.
 - Added a reproducible privileged Debian 13 container builder.
+- Added `version.txt` as the single source for OS identity, ISO labels, filenames, artifact ZIPs, release tags, and nightly links.
 - Added package-list, shell, JSON, XML, desktop-file, duplicate, and private-key validation.
 - Added APT metadata preflight validation for all explicitly selected Debian packages.
 - Added automatic ISO boot-menu timeouts for unattended BIOS and UEFI testing.
 - Added optional QEMU BIOS and UEFI smoke tests in the build workflow template.
 - Added SHA-256 checksums, package manifests, ISO metadata, release metadata, and versioned artifacts.
 - Added workflow templates for cached ISO builds, artifact upload, provenance attestation, and GitHub releases.
-- Added changelog-derived GitHub release notes and a permanent nightly.link download for the latest successful ISO artifact ZIP.
+- Added changelog-derived GitHub release notes plus a permanent nightly.link download in build summaries, artifact metadata, and releases.
 
 ### Fixed
 

@@ -6,7 +6,7 @@ BUILD_ROOT="${BUILD_ROOT:-$ROOT/build}"
 WORK_DIR="$BUILD_ROOT/work"
 CACHE_DIR="${CACHE_DIR:-$BUILD_ROOT/downloads}"
 OUT_DIR="${OUT_DIR:-$ROOT/out}"
-VERSION="${OMNIOS_VERSION:-2026.1}"
+VERSION="$("$ROOT/scripts/read-version.sh")"
 ARCH="${OMNIOS_ARCH:-amd64}"
 OUTPUT_BASENAME="OmniOS-${VERSION}-${ARCH}"
 ACTION="${1:-build}"
@@ -39,6 +39,17 @@ prepare_workspace() {
     fi
     mkdir -p "$WORK_DIR"
     cp -a "$ROOT/auto" "$ROOT/config" "$WORK_DIR/"
+    cp "$ROOT/version.txt" "$WORK_DIR/version.txt"
+
+    local versioned_file
+    while IFS= read -r -d '' versioned_file; do
+        sed -i "s/@OMNIOS_VERSION@/$VERSION/g" "$versioned_file"
+    done < <(grep -rlZ '@OMNIOS_VERSION@' "$WORK_DIR/config" || true)
+    if grep -R -q '@OMNIOS_VERSION@' "$WORK_DIR/config"; then
+        echo 'ERROR: an OmniOS version placeholder was not rendered.' >&2
+        exit 1
+    fi
+
     local relative_cache
     relative_cache="$(realpath --relative-to="$WORK_DIR" "$CACHE_DIR")"
     ln -s "$relative_cache" "$WORK_DIR/cache"
