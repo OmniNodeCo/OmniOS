@@ -175,6 +175,8 @@ Publishing a release requires the workflow token to have `contents: write`. The 
 
 A token secret is the better choice when you would rather not grant write access to every workflow in the repository, since only this release step uses it.
 
+A token with `Contents: Read and write` can publish releases, but creating a **tag on a commit that is not the current branch head** additionally requires permission to create git refs. When the token lacks that, the workflow logs a warning and creates the tag at the default branch head instead; the exact build commit is always recorded in the release notes, so the ISO's provenance is never lost. The release is verified before the multi-gigabyte download starts, so a permission problem fails the run in seconds rather than after the ISO transfer.
+
 After changing either setting, start a **new** run from the Actions tab. *Re-run jobs* reuses the permission context of the original run, so it keeps failing.
 
 The workflow then finds the newest successful `build.yml` run on the default branch **whose `version.txt` equals the requested version**, reads that build commit's changelog section, downloads that run's ISO artifact, and attaches the ISO to the release. If no successful build produced that version, the run fails and lists the versions that are actually available, so a release can never publish an ISO built from a different version. Releasing a version that already has a tag refreshes the existing release's title, notes, and assets in place.

@@ -55,6 +55,84 @@ jobs:
             echo 'Set a RELEASE_TOKEN secret to publish with a personal access token instead.'
           fi
 
+      - name: Verify the token can publish releases
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GH_TOKEN || secrets.PAT_TOKEN || github.token }}
+        run: |
+          # Downloading the ISO takes several minutes, so prove up front that
+          # this token can actually write releases. A draft release is the
+          # cheapest true write test: it creates no git tag and is deleted
+          # immediately afterwards.
+          probe_tag="ci-release-permission-probe-$GITHUB_RUN_ID"
+
+          if output="$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+            -f tag_name="$probe_tag" \
+            -F draft=true \
+            -f name='OmniOS release permission probe' \
+            -f body='Temporary draft created to verify release permissions. Safe to delete.' \
+            --jq '.id' 2>&1)"; then
+            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$output" >/dev/null 2>&1 \
+              || echo "::warning::Could not delete probe draft release $output; delete it manually."
+            echo 'Release write access confirmed.'
+
+            # Tagging a commit that is not the branch head additionally needs
+            # permission to create a git ref. Report it now so the fallback
+            # later in the run is expected rather than surprising.
+            if gh api "repos/$GITHUB_REPOSITORY/git/refs" >/dev/null 2>&1 \
+              && ! gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+                -f ref="refs/tags/$probe_tag" \
+                -f sha="$GITHUB_SHA" >/dev/null 2>&1; then
+              echo '::notice::This token cannot create git tags on arbitrary commits, so the release tag will be created at the default branch head. The exact build commit is recorded in the release notes.'
+            else
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$probe_tag" >/dev/null 2>&1 || true
+            fi
+            exit 0
+          fi
+
+          printf '%s\n' "$output" >&2
+
+          if grep -qi 'Resource not accessible by personal access token' <<< "$output"; then
+            {
+              echo "::error title=Release token cannot write to $GITHUB_REPOSITORY::The personal access token was accepted but lacks write access."
+              echo 'The secret is wired up correctly, but the token does not carry write access'
+              echo 'to this repository. Publishing a release needs Contents: Read and write.'
+              echo
+              echo 'Fine-grained token checklist (Settings -> Developer settings ->'
+              echo 'Personal access tokens -> Fine-grained tokens -> your token):'
+              echo
+              echo "  1. Resource owner must be $GITHUB_REPOSITORY_OWNER, not your personal account"
+              echo '     if those differ. The owner cannot be changed after the token is made,'
+              echo '     so a wrong owner means generating a new token.'
+              echo "  2. Repository access must include $GITHUB_REPOSITORY."
+              echo '  3. Repository permissions -> Contents must be "Read and write".'
+              echo '     That dropdown defaults to "Read-only" and is the usual cause.'
+              echo '  4. An organization-owned token may still need admin approval.'
+              echo '  5. Check the token has not expired.'
+              echo
+              echo 'A classic token needs the full "repo" scope instead.'
+              echo
+              echo 'Update the token, then start a NEW run.'
+            } >&2
+          elif grep -qi 'Resource not accessible by integration' <<< "$output"; then
+            {
+              echo '::error title=Release token cannot write releases::The built-in GITHUB_TOKEN is read-only for this run.'
+              echo 'Fix it with ONE of the following:'
+              echo
+              echo '  1. Settings -> Actions -> General -> Workflow permissions'
+              echo '     -> select "Read and write permissions" -> Save.'
+              echo
+              echo '  2. Add a personal access token that can write to this repository as the'
+              echo '     RELEASE_TOKEN secret (fine-grained: Contents Read and write;'
+              echo '     classic: the "repo" scope).'
+              echo
+              echo 'Then start a NEW run. "Re-run jobs" reuses the old permission context.'
+            } >&2
+          elif grep -qi 'Bad credentials' <<< "$output"; then
+            echo '::error title=Invalid release token::The token secret is not a valid GitHub token. It may be mistyped or expired.' >&2
+          fi
+
+          exit 1
+
       - name: Resolve requested version
         id: version
         env:
@@ -322,7 +400,7 @@ jobs:
           - Version: \`$VERSION\`
           - Release tag: \`$RELEASE_TAG\`
           - Build run: [$BUILD_RUN_ID]($BUILD_RUN_URL)
-          - Source commit: \`$BUILD_SHA\`
+          - Source commit: \`$BUILD_SHA\` (the exact commit this ISO was built from)
           - Architecture: amd64/x86-64
           - Base: Debian 13 Stable (trixie)
           EOF
@@ -354,22 +432,60 @@ jobs:
               --notes-file release-notes.md \
               "${flags[@]}" 2>&1)" && status=0 || status=$?
           else
-            echo "Creating release $RELEASE_TAG at $BUILD_SHA."
             action=create
+            echo "Creating release $RELEASE_TAG at $BUILD_SHA."
             output="$(gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$BUILD_SHA" \
               --title "OmniOS $RELEASE_TAG" \
               --notes-file release-notes.md \
               "${flags[@]}" 2>&1)" && status=0 || status=$?
+
+            # Tagging an arbitrary older commit also needs permission to create a
+            # git ref, which a Contents-only token does not have. Creating the
+            # tag at the branch head needs no such right, so fall back to that
+            # and record the exact build commit in the release notes instead.
+            if (( status != 0 )) && grep -qi 'Resource not accessible' <<< "$output"; then
+              echo "::warning::Could not tag $BUILD_SHA directly; creating $RELEASE_TAG at the default branch head instead. The build commit is recorded in the release notes."
+              output="$(gh release create "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --title "OmniOS $RELEASE_TAG" \
+                --notes-file release-notes.md \
+                "${flags[@]}" 2>&1)" && status=0 || status=$?
+            fi
           fi
 
           printf '%s\n' "$output"
 
           if (( status != 0 )); then
-            if grep -qi 'Resource not accessible by integration' <<< "$output"; then
+            if grep -qi 'Resource not accessible by personal access token' <<< "$output"; then
               {
-                echo "::error title=Cannot $action release::The token for this run is not allowed to write releases."
+                echo "::error title=Cannot $action release::The personal access token cannot write releases in $GITHUB_REPOSITORY."
+                echo 'The token was accepted, so the secret is wired up correctly, but it does not'
+                echo 'carry write access to this repository. Creating a release needs Contents: write.'
+                echo
+                echo 'Fine-grained token checklist (Settings -> Developer settings ->'
+                echo 'Personal access tokens -> Fine-grained tokens -> your token):'
+                echo
+                echo "  1. Resource owner must be $GITHUB_REPOSITORY_OWNER, not a different account."
+                echo '     The owner cannot be changed later; a wrong owner means a new token.'
+                echo "  2. Repository access must include $GITHUB_REPOSITORY"
+                echo '     (\"Only select repositories\" -> pick it, or \"All repositories\").'
+                echo '  3. Repository permissions -> Contents must be \"Read and write\".'
+                echo '     The dropdown defaults to Read-only and is easy to miss.'
+                echo '  4. If the token is owned by an organization, an admin may still need to'
+                echo '     approve it before it works.'
+                echo '  5. Confirm the token has not expired.'
+                echo
+                echo 'A classic token needs the full \"repo\" scope instead.'
+                echo
+                echo 'After editing the token, update the secret value and start a NEW run.'
+                echo 'Editing a token does not change its value, so the secret only needs'
+                echo 'replacing if you generated a new token.'
+              } >&2
+            elif grep -qi 'Resource not accessible by integration' <<< "$output"; then
+              {
+                echo "::error title=Cannot $action release::The built-in GITHUB_TOKEN is not allowed to write releases."
                 echo "This workflow requests \"contents: write\", but a repository whose default workflow"
                 echo 'permission is read-only caps that request, so GitHub answers HTTP 403.'
                 echo
