@@ -177,7 +177,27 @@ A token secret is the better choice when you would rather not grant write access
 
 After changing either setting, start a **new** run from the Actions tab. *Re-run jobs* reuses the permission context of the original run, so it keeps failing.
 
-The workflow then finds the newest successful `build.yml` run on the default branch **whose `version.txt` equals the requested version**, reads that build commit's changelog section, and links the release directly to its version-matched GitHub Actions artifact. If no successful build produced that version, the run fails and lists the versions that are actually available, so a release can never point at an ISO built from a different version. Releasing a version that already has a tag refreshes the existing release's title and notes in place.
+The workflow then finds the newest successful `build.yml` run on the default branch **whose `version.txt` equals the requested version**, reads that build commit's changelog section, downloads that run's ISO artifact, and attaches the ISO to the release. If no successful build produced that version, the run fails and lists the versions that are actually available, so a release can never publish an ISO built from a different version. Releasing a version that already has a tag refreshes the existing release's title, notes, and assets in place.
+
+### Split ISO assets
+
+A single GitHub release asset must stay under **2 GiB**, and the OmniOS ISO is larger than that, so the workflow attaches it as split parts and publishes the checksums alongside them:
+
+```text
+OmniOS-2026.1-amd64.iso.part00      first 1900 MiB
+OmniOS-2026.1-amd64.iso.part01      remainder
+OmniOS-2026.1-amd64.iso.sha256      checksum of the rejoined ISO
+OmniOS-2026.1-amd64.iso-parts.sha256  checksums of the individual parts
+```
+
+Download every part into one folder and rejoin them:
+
+```bash
+cat OmniOS-2026.1-amd64.iso.part* > OmniOS-2026.1-amd64.iso
+sha256sum --check OmniOS-2026.1-amd64.iso.sha256
+```
+
+The parts checksum file is deliberately named `.iso-parts.sha256` rather than `.iso.parts.sha256` so that it does **not** match the `*.iso.part*` glob used to rejoin the image. If the ISO ever drops below 2 GiB, the workflow attaches it as a single `.iso` file instead, with no further action required.
 
 ## Release engineering
 

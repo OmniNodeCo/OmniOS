@@ -30,7 +30,7 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 60
 
     steps:
       - name: Check out OmniOS
@@ -154,6 +154,100 @@ jobs:
 
           echo "Releasing OmniOS $version as $release_tag from build run $run_id ($source_sha)."
 
+      - name: Free runner disk space
+        run: |
+          df -h /
+          # The ISO plus its split parts need roughly twice the ISO size.
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /usr/local/share/boost /usr/lib/jvm "$AGENT_TOOLSDIRECTORY" || true
+          df -h /
+
+      - name: Download ISO from the build run
+        id: iso
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_RUN_ID: ${{ steps.build.outputs.run_id }}
+          ARTIFACT_NAME: ${{ steps.build.outputs.artifact_name }}
+        run: |
+          mkdir -p iso
+          gh run download "$BUILD_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$ARTIFACT_NAME" \
+            --dir iso
+          ls -lh iso
+
+          iso_file="iso/${ARTIFACT_NAME}.iso"
+          [[ -f "$iso_file" ]] || {
+            echo "Artifact $ARTIFACT_NAME does not contain ${ARTIFACT_NAME}.iso." >&2
+            find iso -maxdepth 1 -type f -printf '  %f\n' >&2
+            exit 1
+          }
+
+          # Verify the ISO against the checksum produced by the build.
+          if [[ -f "$iso_file.sha256" ]]; then
+            (cd iso && sha256sum --check "${ARTIFACT_NAME}.iso.sha256")
+            echo 'ISO checksum verified against the build output.'
+          else
+            echo "::warning::No ${ARTIFACT_NAME}.iso.sha256 in the artifact; skipping verification."
+          fi
+
+          iso_bytes="$(stat -c '%s' "$iso_file")"
+          {
+            echo "iso_file=$iso_file"
+            echo "iso_bytes=$iso_bytes"
+            echo "iso_size=$(numfmt --to=iec-i --suffix=B "$iso_bytes")"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release assets
+        id: assets
+        env:
+          ARTIFACT_NAME: ${{ steps.build.outputs.artifact_name }}
+          ISO_FILE: ${{ steps.iso.outputs.iso_file }}
+          ISO_BYTES: ${{ steps.iso.outputs.iso_bytes }}
+        run: |
+          # A single release asset must stay under 2 GiB, so a larger ISO is
+          # published as split parts that users rejoin with `cat`.
+          limit=$(( 2 * 1024 * 1024 * 1024 ))
+          part_size=$(( 1900 * 1024 * 1024 ))
+
+          mkdir -p assets
+          cp "$ISO_FILE"* assets/ 2>/dev/null || cp "$ISO_FILE" assets/
+
+          if (( ISO_BYTES < limit )); then
+            echo 'ISO fits within the 2 GiB asset limit; publishing it whole.'
+            echo 'split=false' >> "$GITHUB_OUTPUT"
+          else
+            echo "ISO is larger than 2 GiB; splitting into ${part_size}-byte parts."
+            ( cd assets && split -b "$part_size" -d -a 2 \
+                "${ARTIFACT_NAME}.iso" "${ARTIFACT_NAME}.iso.part" )
+            rm -f "assets/${ARTIFACT_NAME}.iso"
+            # The checksum file must NOT match the .iso.part* glob users run
+            # through `cat`, or it would be concatenated into the rejoined ISO.
+            ( cd assets && sha256sum "${ARTIFACT_NAME}".iso.part[0-9][0-9] \
+                > "${ARTIFACT_NAME}.iso-parts.sha256" )
+            echo 'split=true' >> "$GITHUB_OUTPUT"
+          fi
+
+          # Guard against any asset that still exceeds the hard limit.
+          oversized=0
+          while IFS= read -r -d '' f; do
+            size="$(stat -c '%s' "$f")"
+            if (( size >= limit )); then
+              echo "Asset $(basename "$f") is $size bytes, over the 2 GiB limit." >&2
+              oversized=1
+            fi
+          done < <(find assets -maxdepth 1 -type f -print0)
+          (( oversized == 0 )) || exit 1
+
+          {
+            echo 'parts<<PARTS_EOF'
+            ( cd assets && find . -maxdepth 1 -type f -printf '%f\t%s\n' | sort )
+            echo 'PARTS_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+          ls -lh assets
+          df -h /
+
       - name: Generate release notes
         env:
           VERSION: ${{ steps.build.outputs.version }}
@@ -164,6 +258,8 @@ jobs:
           ARTIFACT_NAME: ${{ steps.build.outputs.artifact_name }}
           ARTIFACT_URL: ${{ steps.build.outputs.artifact_url }}
           ARTIFACT_SIZE: ${{ steps.build.outputs.artifact_size }}
+          ISO_SIZE: ${{ steps.iso.outputs.iso_size }}
+          SPLIT: ${{ steps.assets.outputs.split }}
         run: |
           git show "$BUILD_SHA:CHANGELOG.md" > build-changelog.md
           awk -v heading="## [$VERSION]" '
@@ -186,9 +282,40 @@ jobs:
 
           ## Download
 
-          [Download ${ARTIFACT_NAME}.zip from the latest successful build]($ARTIFACT_URL) ($ARTIFACT_SIZE)
+          The OmniOS ISO is attached to this release, so no GitHub sign-in is required.
 
-          The build artifact contains \`${ARTIFACT_NAME}.iso\`, its SHA-256 checksum, the package manifest, build metadata, and ISO metadata. GitHub requires users to sign in before downloading Actions artifacts.
+          EOF
+
+          if [[ "$SPLIT" == "true" ]]; then
+            cat >> release-notes.md <<EOF
+          \`${ARTIFACT_NAME}.iso\` is $ISO_SIZE, and a single GitHub release asset must stay under 2 GiB, so the ISO is attached as split parts. Download every \`.iso.partNN\` file into one folder and rejoin them:
+
+          \`\`\`bash
+          cat ${ARTIFACT_NAME}.iso.part* > ${ARTIFACT_NAME}.iso
+          sha256sum --check ${ARTIFACT_NAME}.iso.sha256
+          \`\`\`
+
+          On Windows PowerShell:
+
+          \`\`\`powershell
+          cmd /c copy /b ${ARTIFACT_NAME}.iso.part00 + ${ARTIFACT_NAME}.iso.part01 ${ARTIFACT_NAME}.iso
+          \`\`\`
+
+          Verify the rejoined ISO with \`${ARTIFACT_NAME}.iso.sha256\` before writing it to a USB stick. \`${ARTIFACT_NAME}.iso-parts.sha256\` checks the individual parts before rejoining.
+          EOF
+          else
+            cat >> release-notes.md <<EOF
+          Download \`${ARTIFACT_NAME}.iso\` ($ISO_SIZE) and verify it before writing it to a USB stick:
+
+          \`\`\`bash
+          sha256sum --check ${ARTIFACT_NAME}.iso.sha256
+          \`\`\`
+          EOF
+          fi
+
+          cat >> release-notes.md <<EOF
+
+          The original build artifact ZIP, which also contains the package manifest and ISO metadata, remains available to signed-in users: [${ARTIFACT_NAME}.zip]($ARTIFACT_URL) ($ARTIFACT_SIZE).
 
           ## Build source
 
@@ -265,6 +392,26 @@ jobs:
             exit "$status"
           fi
 
+      - name: Upload ISO to the release
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GH_TOKEN || secrets.PAT_TOKEN || github.token }}
+          RELEASE_TAG: ${{ steps.build.outputs.tag }}
+        run: |
+          mapfile -t upload < <(find assets -maxdepth 1 -type f | sort)
+          (( ${#upload[@]} > 0 )) || { echo 'No release assets were prepared.' >&2; exit 1; }
+
+          echo "Uploading ${#upload[@]} asset(s) to $RELEASE_TAG:"
+          printf '  %s\n' "${upload[@]}"
+
+          # --clobber replaces assets when a release is republished.
+          gh release upload "$RELEASE_TAG" "${upload[@]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+          echo 'Attached assets:'
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json assets --jq '.assets[] | "  \(.name)  \(.size) bytes"'
+
       - name: Summarize release
         env:
           VERSION: ${{ steps.build.outputs.version }}
@@ -272,6 +419,9 @@ jobs:
           BUILD_RUN_URL: ${{ steps.build.outputs.run_url }}
           ARTIFACT_URL: ${{ steps.build.outputs.artifact_url }}
           ARTIFACT_SIZE: ${{ steps.build.outputs.artifact_size }}
+          ISO_SIZE: ${{ steps.iso.outputs.iso_size }}
+          SPLIT: ${{ steps.assets.outputs.split }}
+          PARTS: ${{ steps.assets.outputs.parts }}
         run: |
           {
             echo "## OmniOS $RELEASE_TAG published"
@@ -282,5 +432,13 @@ jobs:
             echo "| Release tag | \`$RELEASE_TAG\` |"
             echo "| Release | https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG |"
             echo "| Build run | $BUILD_RUN_URL |"
-            echo "| Download | $ARTIFACT_URL ($ARTIFACT_SIZE) |"
+            echo "| ISO size | $ISO_SIZE |"
+            echo "| Split into parts | $SPLIT |"
+            echo "| Build artifact | $ARTIFACT_URL ($ARTIFACT_SIZE) |"
+            echo
+            echo "### Attached assets"
+            echo
+            echo '```'
+            printf '%s\n' "$PARTS"
+            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

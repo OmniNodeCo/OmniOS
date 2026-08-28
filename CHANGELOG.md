@@ -77,6 +77,8 @@ OmniOS Desktop 2026.1 is the first consumer desktop release in the year-based re
 - Added `mark_latest` and `prerelease` release options and a release job summary.
 - Added optional `RELEASE_TOKEN`, `GH_TOKEN` and `PAT_TOKEN` secrets so releases can be published with a personal access token when the default workflow token is read-only.
 - Added actionable diagnostics when the release token is denied `contents: write`, instead of a bare HTTP 403.
+- Added automatic download of the ISO from the matching build run and attachment of it to the GitHub release, so downloads no longer require signing in to GitHub.
+- Added automatic splitting of the ISO into sub-2-GiB release assets, with checksums for both the rejoined image and the individual parts.
 
 ### Fixed
 
