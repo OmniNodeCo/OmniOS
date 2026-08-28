@@ -38,14 +38,21 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Report release token mode
+      - name: Report release token
         env:
-          USING_PAT: ${{ secrets.RELEASE_TOKEN != '' }}
+          HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN != '' }}
+          HAS_GH_TOKEN: ${{ secrets.GH_TOKEN != '' }}
+          HAS_PAT_TOKEN: ${{ secrets.PAT_TOKEN != '' }}
         run: |
-          if [[ "$USING_PAT" == "true" ]]; then
+          if [[ "$HAS_RELEASE_TOKEN" == "true" ]]; then
             echo 'Publishing releases with the RELEASE_TOKEN secret.'
+          elif [[ "$HAS_GH_TOKEN" == "true" ]]; then
+            echo 'Publishing releases with the GH_TOKEN secret.'
+          elif [[ "$HAS_PAT_TOKEN" == "true" ]]; then
+            echo 'Publishing releases with the PAT_TOKEN secret.'
           else
             echo 'Publishing releases with the built-in GITHUB_TOKEN.'
+            echo 'Set a RELEASE_TOKEN secret to publish with a personal access token instead.'
           fi
 
       - name: Resolve requested version
@@ -195,7 +202,7 @@ jobs:
 
       - name: Create or update GitHub release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GH_TOKEN || secrets.PAT_TOKEN || github.token }}
           VERSION: ${{ steps.build.outputs.version }}
           RELEASE_TAG: ${{ steps.build.outputs.tag }}
           BUILD_SHA: ${{ steps.build.outputs.source_sha }}
@@ -244,9 +251,12 @@ jobs:
                 echo '  1. Settings -> Actions -> General -> Workflow permissions'
                 echo '     -> select "Read and write permissions" -> Save.'
                 echo
-                echo '  2. Create a fine-grained personal access token scoped to this repository'
-                echo '     with "Contents: Read and write", save it as the repository secret'
-                echo '     RELEASE_TOKEN, and run this workflow again. It is used automatically.'
+                echo '  2. Create a personal access token that can write to this repository:'
+                echo '     - fine-grained: Contents -> Read and write on OmniOS; or'
+                echo '     - classic: the "repo" scope.'
+                echo '     Save it as the repository secret RELEASE_TOKEN'
+                echo '     (Settings -> Secrets and variables -> Actions -> New repository secret).'
+                echo '     The workflow uses RELEASE_TOKEN, GH_TOKEN or PAT_TOKEN automatically.'
                 echo
                 echo 'Then start a NEW run from the Actions tab. Do not use "Re-run jobs":'
                 echo 'a re-run reuses the permission context of the original run.'

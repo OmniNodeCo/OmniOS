@@ -171,7 +171,9 @@ version input: 2026.1   ->  release tag: v2026.1   ->  release title: OmniOS v20
 Publishing a release requires the workflow token to have `contents: write`. The workflow declares that permission, but a repository whose **Settings → Actions → General → Workflow permissions** is set to *Read repository contents and packages permissions* caps the request, and the release step then fails with `HTTP 403: Resource not accessible by integration`. Fix it in one of two ways:
 
 - set **Workflow permissions** to **Read and write permissions**; or
-- create a fine-grained personal access token scoped to this repository with **Contents: Read and write**, and save it as the repository secret `RELEASE_TOKEN`. The workflow uses `RELEASE_TOKEN` automatically whenever the secret exists.
+- publish with a personal access token instead. Create one that can write to this repository — fine-grained with **Contents: Read and write**, or classic with the **`repo`** scope — then save it under **Settings → Secrets and variables → Actions → New repository secret**. The workflow picks up `RELEASE_TOKEN`, `GH_TOKEN` or `PAT_TOKEN` automatically, in that order, and falls back to the built-in `GITHUB_TOKEN` when none is set.
+
+A token secret is the better choice when you would rather not grant write access to every workflow in the repository, since only this release step uses it.
 
 After changing either setting, start a **new** run from the Actions tab. *Re-run jobs* reuses the permission context of the original run, so it keeps failing.
 
