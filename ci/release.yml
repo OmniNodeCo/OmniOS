@@ -38,100 +38,115 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Report release token
+      - name: Select a token that can publish releases
+        id: token
         env:
-          HAS_RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN != '' }}
-          HAS_GH_TOKEN: ${{ secrets.GH_TOKEN != '' }}
-          HAS_PAT_TOKEN: ${{ secrets.PAT_TOKEN != '' }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          ALT_GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          ALT_PAT_TOKEN: ${{ secrets.PAT_TOKEN }}
+          WORKFLOW_TOKEN: ${{ github.token }}
         run: |
-          if [[ "$HAS_RELEASE_TOKEN" == "true" ]]; then
-            echo 'Publishing releases with the RELEASE_TOKEN secret.'
-          elif [[ "$HAS_GH_TOKEN" == "true" ]]; then
-            echo 'Publishing releases with the GH_TOKEN secret.'
-          elif [[ "$HAS_PAT_TOKEN" == "true" ]]; then
-            echo 'Publishing releases with the PAT_TOKEN secret.'
-          else
-            echo 'Publishing releases with the built-in GITHUB_TOKEN.'
-            echo 'Set a RELEASE_TOKEN secret to publish with a personal access token instead.'
-          fi
-
-      - name: Verify the token can publish releases
-        env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GH_TOKEN || secrets.PAT_TOKEN || github.token }}
-        run: |
-          # Downloading the ISO takes several minutes, so prove up front that
-          # this token can actually write releases. A draft release is the
-          # cheapest true write test: it creates no git tag and is deleted
-          # immediately afterwards.
+          # Downloading the ISO takes several minutes, so prove up front that a
+          # token can actually publish a release. Every configured token is
+          # tried and the first one that works is used, so a misconfigured PAT
+          # no longer hides a perfectly good built-in GITHUB_TOKEN.
           probe_tag="ci-release-permission-probe-$GITHUB_RUN_ID"
+          chosen=""
+          chosen_name=""
+          can_tag=false
+          summary=""
 
-          if output="$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
-            -f tag_name="$probe_tag" \
-            -F draft=true \
-            -f name='OmniOS release permission probe' \
-            -f body='Temporary draft created to verify release permissions. Safe to delete.' \
-            --jq '.id' 2>&1)"; then
-            gh api --method DELETE "repos/$GITHUB_REPOSITORY/releases/$output" >/dev/null 2>&1 \
-              || echo "::warning::Could not delete probe draft release $output; delete it manually."
-            echo 'Release write access confirmed.'
+          try_token() {
+            local name="$1" value="$2" out release_id
+            [[ -n "$value" ]] || return 1
 
-            # Tagging a commit that is not the branch head additionally needs
-            # permission to create a git ref. Report it now so the fallback
-            # later in the run is expected rather than surprising.
-            if gh api "repos/$GITHUB_REPOSITORY/git/refs" >/dev/null 2>&1 \
-              && ! gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
-                -f ref="refs/tags/$probe_tag" \
-                -f sha="$GITHUB_SHA" >/dev/null 2>&1; then
-              echo '::notice::This token cannot create git tags on arbitrary commits, so the release tag will be created at the default branch head. The exact build commit is recorded in the release notes.'
-            else
-              gh api --method DELETE "repos/$GITHUB_REPOSITORY/git/refs/tags/$probe_tag" >/dev/null 2>&1 || true
+            out="$(GH_TOKEN="$value" gh api --method POST \
+              "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$probe_tag" \
+              -F draft=true \
+              -f name='OmniOS release permission probe' \
+              -f body='Temporary draft used to verify release permissions. Safe to delete.' \
+              --jq '.id' 2>&1)" || {
+              local reason='cannot publish releases'
+              grep -qi 'Bad credentials' <<< "$out" && reason='is invalid or expired'
+              grep -qi 'Resource not accessible by personal access token' <<< "$out" \
+                && reason='lacks Contents: Read and write on this repository'
+              grep -qi 'Resource not accessible by integration' <<< "$out" \
+                && reason='is read-only (repository workflow permissions)'
+              echo "  $name: $reason"
+              summary="$summary  $name: $reason"$'\n'
+              return 1
+            }
+
+            release_id="$out"
+            GH_TOKEN="$value" gh api --method DELETE \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" >/dev/null 2>&1 \
+              || echo "::warning::Could not delete probe draft $release_id; delete it manually."
+
+            echo "  $name: can publish releases"
+            summary="$summary  $name: OK"$'\n'
+
+            # Tagging a commit that is not the branch head also needs git ref
+            # creation rights, which Contents-only tokens do not have.
+            if GH_TOKEN="$value" gh api --method POST \
+              "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$probe_tag" \
+              -f sha="$GITHUB_SHA" >/dev/null 2>&1; then
+              can_tag=true
+              GH_TOKEN="$value" gh api --method DELETE \
+                "repos/$GITHUB_REPOSITORY/git/refs/tags/$probe_tag" >/dev/null 2>&1 || true
             fi
-            exit 0
-          fi
 
-          printf '%s\n' "$output" >&2
+            chosen="$value"
+            chosen_name="$name"
+            return 0
+          }
 
-          if grep -qi 'Resource not accessible by personal access token' <<< "$output"; then
+          echo 'Checking which configured tokens can publish releases:'
+          try_token RELEASE_TOKEN "$RELEASE_TOKEN" \
+            || try_token GH_TOKEN "$ALT_GH_TOKEN" \
+            || try_token PAT_TOKEN "$ALT_PAT_TOKEN" \
+            || try_token GITHUB_TOKEN "$WORKFLOW_TOKEN" \
+            || true
+
+          if [[ -z "$chosen" ]]; then
             {
-              echo "::error title=Release token cannot write to $GITHUB_REPOSITORY::The personal access token was accepted but lacks write access."
-              echo 'The secret is wired up correctly, but the token does not carry write access'
-              echo 'to this repository. Publishing a release needs Contents: Read and write.'
+              echo '::error title=No token can publish releases::Every configured token was rejected.'
+              echo 'Results:'
+              printf '%s' "$summary"
               echo
-              echo 'Fine-grained token checklist (Settings -> Developer settings ->'
-              echo 'Personal access tokens -> Fine-grained tokens -> your token):'
+              echo 'Pick whichever of these is easiest:'
               echo
-              echo "  1. Resource owner must be $GITHUB_REPOSITORY_OWNER, not your personal account"
-              echo '     if those differ. The owner cannot be changed after the token is made,'
-              echo '     so a wrong owner means generating a new token.'
-              echo "  2. Repository access must include $GITHUB_REPOSITORY."
-              echo '  3. Repository permissions -> Contents must be "Read and write".'
-              echo '     That dropdown defaults to "Read-only" and is the usual cause.'
-              echo '  4. An organization-owned token may still need admin approval.'
-              echo '  5. Check the token has not expired.'
+              echo '  A. Use the built-in token (no secret needed).'
+              echo '     Settings -> Actions -> General -> Workflow permissions'
+              echo '     -> "Read and write permissions" -> Save.'
+              echo '     Then DELETE the RELEASE_TOKEN secret if it exists, or leave it:'
+              echo '     this workflow now falls back to the built-in token automatically.'
               echo
-              echo 'A classic token needs the full "repo" scope instead.'
-              echo
-              echo 'Update the token, then start a NEW run.'
-            } >&2
-          elif grep -qi 'Resource not accessible by integration' <<< "$output"; then
-            {
-              echo '::error title=Release token cannot write releases::The built-in GITHUB_TOKEN is read-only for this run.'
-              echo 'Fix it with ONE of the following:'
-              echo
-              echo '  1. Settings -> Actions -> General -> Workflow permissions'
-              echo '     -> select "Read and write permissions" -> Save.'
-              echo
-              echo '  2. Add a personal access token that can write to this repository as the'
-              echo '     RELEASE_TOKEN secret (fine-grained: Contents Read and write;'
-              echo '     classic: the "repo" scope).'
+              echo '  B. Fix the personal access token.'
+              echo '     Fine-grained tokens are the usual culprit. Confirm all of:'
+              echo "       - Resource owner is $GITHUB_REPOSITORY_OWNER"
+              echo "       - Repository access includes $GITHUB_REPOSITORY"
+              echo '       - Repository permissions -> Contents = "Read and write"'
+              echo '       - Not expired, and approved if organization-owned'
+              echo '     A classic token just needs the "repo" scope, which is simpler.'
               echo
               echo 'Then start a NEW run. "Re-run jobs" reuses the old permission context.'
             } >&2
-          elif grep -qi 'Bad credentials' <<< "$output"; then
-            echo '::error title=Invalid release token::The token secret is not a valid GitHub token. It may be mistyped or expired.' >&2
+            exit 1
           fi
 
-          exit 1
+          echo "Publishing releases with $chosen_name."
+          if [[ "$can_tag" != "true" ]]; then
+            echo "::notice::$chosen_name cannot create git tags on arbitrary commits, so the release tag will be created at the default branch head. The exact build commit is recorded in the release notes."
+          fi
+
+          echo "::add-mask::$chosen"
+          {
+            echo "token=$chosen"
+            echo "token_name=$chosen_name"
+            echo "can_tag=$can_tag"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Resolve requested version
         id: version
@@ -407,10 +422,11 @@ jobs:
 
       - name: Create or update GitHub release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GH_TOKEN || secrets.PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
           VERSION: ${{ steps.build.outputs.version }}
           RELEASE_TAG: ${{ steps.build.outputs.tag }}
           BUILD_SHA: ${{ steps.build.outputs.source_sha }}
+          CAN_TAG: ${{ steps.token.outputs.can_tag }}
           MARK_LATEST: ${{ inputs.mark_latest }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
@@ -433,20 +449,29 @@ jobs:
               "${flags[@]}" 2>&1)" && status=0 || status=$?
           else
             action=create
-            echo "Creating release $RELEASE_TAG at $BUILD_SHA."
-            output="$(gh release create "$RELEASE_TAG" \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$BUILD_SHA" \
-              --title "OmniOS $RELEASE_TAG" \
-              --notes-file release-notes.md \
-              "${flags[@]}" 2>&1)" && status=0 || status=$?
+            if [[ "$CAN_TAG" == "true" ]]; then
+              echo "Creating release $RELEASE_TAG at $BUILD_SHA."
+              output="$(gh release create "$RELEASE_TAG" \
+                --repo "$GITHUB_REPOSITORY" \
+                --target "$BUILD_SHA" \
+                --title "OmniOS $RELEASE_TAG" \
+                --notes-file release-notes.md \
+                "${flags[@]}" 2>&1)" && status=0 || status=$?
+            else
+              echo "Creating release $RELEASE_TAG at the default branch head."
+              output=''
+              status=1
+            fi
 
             # Tagging an arbitrary older commit also needs permission to create a
             # git ref, which a Contents-only token does not have. Creating the
             # tag at the branch head needs no such right, so fall back to that
             # and record the exact build commit in the release notes instead.
-            if (( status != 0 )) && grep -qi 'Resource not accessible' <<< "$output"; then
-              echo "::warning::Could not tag $BUILD_SHA directly; creating $RELEASE_TAG at the default branch head instead. The build commit is recorded in the release notes."
+            if (( status != 0 )) \
+              && { [[ "$CAN_TAG" != "true" ]] || grep -qi 'Resource not accessible' <<< "$output"; }; then
+              if [[ "$CAN_TAG" == "true" ]]; then
+                echo "::warning::Could not tag $BUILD_SHA directly; creating $RELEASE_TAG at the default branch head instead. The build commit is recorded in the release notes."
+              fi
               output="$(gh release create "$RELEASE_TAG" \
                 --repo "$GITHUB_REPOSITORY" \
                 --title "OmniOS $RELEASE_TAG" \
@@ -510,7 +535,7 @@ jobs:
 
       - name: Upload ISO to the release
         env:
-          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GH_TOKEN || secrets.PAT_TOKEN || github.token }}
+          GH_TOKEN: ${{ steps.token.outputs.token }}
           RELEASE_TAG: ${{ steps.build.outputs.tag }}
         run: |
           mapfile -t upload < <(find assets -maxdepth 1 -type f | sort)

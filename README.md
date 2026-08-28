@@ -171,9 +171,11 @@ version input: 2026.1   ->  release tag: v2026.1   ->  release title: OmniOS v20
 Publishing a release requires the workflow token to have `contents: write`. The workflow declares that permission, but a repository whose **Settings → Actions → General → Workflow permissions** is set to *Read repository contents and packages permissions* caps the request, and the release step then fails with `HTTP 403: Resource not accessible by integration`. Fix it in one of two ways:
 
 - set **Workflow permissions** to **Read and write permissions**; or
-- publish with a personal access token instead. Create one that can write to this repository — fine-grained with **Contents: Read and write**, or classic with the **`repo`** scope — then save it under **Settings → Secrets and variables → Actions → New repository secret**. The workflow picks up `RELEASE_TOKEN`, `GH_TOKEN` or `PAT_TOKEN` automatically, in that order, and falls back to the built-in `GITHUB_TOKEN` when none is set.
+- publish with a personal access token instead. Create one that can write to this repository — fine-grained with **Contents: Read and write**, or classic with the **`repo`** scope — then save it under **Settings → Secrets and variables → Actions → New repository secret** as `RELEASE_TOKEN`, `GH_TOKEN` or `PAT_TOKEN`.
 
-A token secret is the better choice when you would rather not grant write access to every workflow in the repository, since only this release step uses it.
+Either route works on its own; you do not need both. Setting **Workflow permissions** to read and write is the simpler of the two, because it needs no secret to create, store, or rotate.
+
+The workflow does not blindly trust whichever token is configured. Before downloading anything it **tries every available token in turn** — `RELEASE_TOKEN`, `GH_TOKEN`, `PAT_TOKEN`, then the built-in `GITHUB_TOKEN` — by creating and immediately deleting a throwaway draft release, and uses the first one that genuinely works. A misconfigured PAT therefore no longer masks a perfectly good built-in token; it is reported and skipped. If every token is rejected, the run fails in seconds with a per-token reason.
 
 A token with `Contents: Read and write` can publish releases, but creating a **tag on a commit that is not the current branch head** additionally requires permission to create git refs. When the token lacks that, the workflow logs a warning and creates the tag at the default branch head instead; the exact build commit is always recorded in the release notes, so the ISO's provenance is never lost. The release is verified before the multi-gigabyte download starts, so a permission problem fails the run in seconds rather than after the ISO transfer.
 
