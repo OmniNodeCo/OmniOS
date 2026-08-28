@@ -51,6 +51,8 @@ The **OmniOS Security Center** launches the graphical antivirus, firewall, passw
 
 Changing that value updates the generated OS identity, Calamares branding, ISO volume label, ISO filename, GitHub artifact ZIP name, QEMU defaults, release tag, and nightly download link. Add a matching `CHANGELOG.md` section before publishing a new version.
 
+Releases are tagged with a `v` prefix, so `version.txt` containing `2026.1` publishes as tag `v2026.1`.
+
 ## Build requirements
 
 The recommended build runs inside a privileged Debian 13 container so the host distribution does not affect live-build:
@@ -148,7 +150,25 @@ git commit -m "ci: install Debian ISO workflows"
 git push
 ```
 
-The build workflow reads `version.txt`, uses it for the ISO and artifact ZIP names, caches downloaded Debian packages, builds inside `debian:13-slim`, verifies the ISO checksum, optionally tests BIOS and UEFI boot, and publishes the nightly.link URL in the job summary and artifact metadata. The release workflow finds the latest successful `build.yml` run on the default branch, reads that build commit's `version.txt` and changelog, and links the release directly to its version-matched GitHub Actions artifact. Build artifacts are retained for 90 days.
+The build workflow reads `version.txt`, uses it for the ISO and artifact ZIP names, caches downloaded Debian packages, builds inside `debian:13-slim`, verifies the ISO checksum, optionally tests BIOS and UEFI boot, and publishes the nightly.link URL in the job summary and artifact metadata. Build artifacts are retained for 90 days.
+
+### Publishing a release
+
+Run **Release OmniOS ISO** from the Actions tab. It takes three optional inputs:
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `version` | blank | Version number to publish, for example `2026.1`. A leading `v` is accepted and stripped. Leave blank to release whatever the latest successful build produced. |
+| `mark_latest` | true | Mark the release as the repository's *Latest* release. |
+| `prerelease` | false | Publish as a pre-release instead. |
+
+The version number you type selects the release, and the tag is that number prefixed with `v`:
+
+```text
+version input: 2026.1   ->  release tag: v2026.1   ->  release title: OmniOS v2026.1
+```
+
+The workflow then finds the newest successful `build.yml` run on the default branch **whose `version.txt` equals the requested version**, reads that build commit's changelog section, and links the release directly to its version-matched GitHub Actions artifact. If no successful build produced that version, the run fails and lists the versions that are actually available, so a release can never point at an ISO built from a different version. Releasing a version that already has a tag refreshes the existing release's title and notes in place.
 
 ## Release engineering
 
@@ -159,7 +179,8 @@ Before a public release:
 3. install on representative Intel and AMD hardware;
 4. test Wi-Fi, Bluetooth, sound, suspend/resume, graphics, and disk encryption;
 5. test a Btrfs snapshot and recovery procedure;
-6. confirm the checksum, package manifest, and direct build-artifact download are available.
+6. confirm the checksum, package manifest, and direct build-artifact download are available;
+7. run **Release OmniOS ISO** and enter the version number, for example `2026.1`, to publish tag `v2026.1`.
 
 ## Licensing
 

@@ -72,6 +72,9 @@ OmniOS Desktop 2026.1 is the first consumer desktop release in the year-based re
 - Added SHA-256 checksums, package manifests, ISO metadata, release metadata, and versioned artifacts.
 - Added workflow templates for cached ISO builds, artifact upload, and GitHub releases sourced from the latest successful build.
 - Added nightly links to build summaries and metadata, while releases resolve the newest successful `build.yml` artifact directly through GitHub Actions.
+- Added a release workflow version input: entering `2026.1` publishes the release as tag `v2026.1`, titled `OmniOS v2026.1`.
+- Added release selection by version number, so a release only ever links to an artifact built from that exact `version.txt`.
+- Added `mark_latest` and `prerelease` release options and a release job summary.
 
 ### Fixed
 
