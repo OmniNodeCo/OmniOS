@@ -38,6 +38,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Report release token mode
+        env:
+          USING_PAT: ${{ secrets.RELEASE_TOKEN != '' }}
+        run: |
+          if [[ "$USING_PAT" == "true" ]]; then
+            echo 'Publishing releases with the RELEASE_TOKEN secret.'
+          else
+            echo 'Publishing releases with the built-in GITHUB_TOKEN.'
+          fi
+
       - name: Resolve requested version
         id: version
         env:
@@ -185,7 +195,7 @@ jobs:
 
       - name: Create or update GitHub release
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
           VERSION: ${{ steps.build.outputs.version }}
           RELEASE_TAG: ${{ steps.build.outputs.tag }}
           BUILD_SHA: ${{ steps.build.outputs.source_sha }}
@@ -203,19 +213,46 @@ jobs:
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             # An existing tag cannot be repointed, so --target is deliberately omitted here.
             echo "Updating existing release $RELEASE_TAG."
-            gh release edit "$RELEASE_TAG" \
+            action=update
+            output="$(gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "OmniOS $RELEASE_TAG" \
               --notes-file release-notes.md \
-              "${flags[@]}"
+              "${flags[@]}" 2>&1)" && status=0 || status=$?
           else
             echo "Creating release $RELEASE_TAG at $BUILD_SHA."
-            gh release create "$RELEASE_TAG" \
+            action=create
+            output="$(gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$BUILD_SHA" \
               --title "OmniOS $RELEASE_TAG" \
               --notes-file release-notes.md \
-              "${flags[@]}"
+              "${flags[@]}" 2>&1)" && status=0 || status=$?
+          fi
+
+          printf '%s\n' "$output"
+
+          if (( status != 0 )); then
+            if grep -qi 'Resource not accessible by integration' <<< "$output"; then
+              {
+                echo "::error title=Cannot $action release::The token for this run is not allowed to write releases."
+                echo "This workflow requests \"contents: write\", but a repository whose default workflow"
+                echo 'permission is read-only caps that request, so GitHub answers HTTP 403.'
+                echo
+                echo 'Fix it with ONE of the following:'
+                echo
+                echo '  1. Settings -> Actions -> General -> Workflow permissions'
+                echo '     -> select "Read and write permissions" -> Save.'
+                echo
+                echo '  2. Create a fine-grained personal access token scoped to this repository'
+                echo '     with "Contents: Read and write", save it as the repository secret'
+                echo '     RELEASE_TOKEN, and run this workflow again. It is used automatically.'
+                echo
+                echo 'Then start a NEW run from the Actions tab. Do not use "Re-run jobs":'
+                echo 'a re-run reuses the permission context of the original run.'
+              } >&2
+            fi
+            exit "$status"
           fi
 
       - name: Summarize release
