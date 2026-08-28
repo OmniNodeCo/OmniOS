@@ -2,6 +2,22 @@ name: Release OmniOS ISO
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number to release, for example 2026.1 (published as tag v2026.1). Leave blank to use the latest successful build.'
+        required: false
+        default: ""
+        type: string
+      mark_latest:
+        description: Mark this release as the Latest release
+        required: false
+        default: true
+        type: boolean
+      prerelease:
+        description: Publish as a pre-release
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   actions: read
@@ -22,29 +38,70 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Resolve latest successful build
+      - name: Resolve requested version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          requested="$(printf '%s' "$INPUT_VERSION" | tr -d '[:space:]')"
+          requested="${requested#[vV]}"
+
+          if [[ -n "$requested" ]]; then
+            printf '%s\n' "$requested" > requested-version.txt
+            requested="$(scripts/read-version.sh requested-version.txt)"
+            echo "Requested OmniOS version: $requested"
+          else
+            echo 'No version requested; using the latest successful build.'
+          fi
+
+          echo "requested=$requested" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve matching build
         id: build
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED_VERSION: ${{ steps.version.outputs.requested }}
         run: |
           default_branch="$(gh api "repos/$GITHUB_REPOSITORY" --jq '.default_branch')"
           runs_json="$(gh api --method GET \
             "repos/$GITHUB_REPOSITORY/actions/workflows/build.yml/runs" \
             -f branch="$default_branch" \
             -f status=success \
-            -f per_page=20)"
-          run_id="$(jq -r '.workflow_runs[0].id // empty' <<< "$runs_json")"
-          source_sha="$(jq -r '.workflow_runs[0].head_sha // empty' <<< "$runs_json")"
-          [[ "$run_id" =~ ^[0-9]+$ && "$source_sha" =~ ^[0-9a-f]{40}$ ]] || {
-            echo "No successful build.yml run was found on $default_branch" >&2
+            -f per_page=50)"
+
+          run_id=""
+          source_sha=""
+          version=""
+          seen_versions=""
+
+          while read -r candidate_id candidate_sha; do
+            [[ "$candidate_id" =~ ^[0-9]+$ ]] || continue
+            [[ "$candidate_sha" =~ ^[0-9a-f]{40}$ ]] || continue
+            git cat-file -e "$candidate_sha^{commit}" 2>/dev/null || continue
+            git show "$candidate_sha:version.txt" > candidate-version.txt 2>/dev/null || continue
+            candidate_version="$(scripts/read-version.sh candidate-version.txt)" || continue
+            seen_versions="$seen_versions $candidate_version"
+
+            if [[ -z "$REQUESTED_VERSION" || "$candidate_version" == "$REQUESTED_VERSION" ]]; then
+              run_id="$candidate_id"
+              source_sha="$candidate_sha"
+              version="$candidate_version"
+              break
+            fi
+          done < <(jq -r '.workflow_runs[] | "\(.id) \(.head_sha)"' <<< "$runs_json")
+
+          if [[ -z "$run_id" ]]; then
+            if [[ -n "$REQUESTED_VERSION" ]]; then
+              echo "No successful build.yml run on $default_branch built OmniOS $REQUESTED_VERSION." >&2
+              echo "Versions available from recent successful builds:$(tr ' ' '\n' <<< "$seen_versions" | sort -u -V | tr '\n' ' ')" >&2
+              echo "Set version.txt to $REQUESTED_VERSION, run Build OmniOS ISO, then release again." >&2
+            else
+              echo "No successful build.yml run was found on $default_branch." >&2
+            fi
             exit 1
-          }
+          fi
 
-          git cat-file -e "$source_sha^{commit}"
-          git show "$source_sha:version.txt" > build-version.txt
-          version="$(scripts/read-version.sh build-version.txt)"
           artifact_name="OmniOS-${version}-amd64"
-
           artifacts_json="$(gh api \
             "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts")"
           artifact_id="$(jq -r --arg name "$artifact_name" \
@@ -53,28 +110,37 @@ jobs:
           artifact_size="$(jq -r --arg name "$artifact_name" \
             '[.artifacts[] | select(.name == $name and .expired == false)][0].size_in_bytes // empty' \
             <<< "$artifacts_json")"
-          [[ "$artifact_id" =~ ^[0-9]+$ && "$artifact_size" =~ ^[0-9]+$ ]] || {
-            echo "Run $run_id has no unexpired $artifact_name artifact" >&2
-            exit 1
-          }
 
+          if [[ ! "$artifact_id" =~ ^[0-9]+$ || ! "$artifact_size" =~ ^[0-9]+$ ]]; then
+            echo "Build run $run_id has no unexpired $artifact_name artifact." >&2
+            echo "Artifacts present in that run:" >&2
+            jq -r '.artifacts[] | "  \(.name) (expired=\(.expired))"' <<< "$artifacts_json" >&2
+            exit 1
+          fi
+
+          release_tag="v$version"
           artifact_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts/$artifact_id"
           run_url="https://github.com/$GITHUB_REPOSITORY/actions/runs/$run_id"
           artifact_size_display="$(numfmt --to=iec-i --suffix=B "$artifact_size")"
 
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "tag=$version" >> "$GITHUB_OUTPUT"
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-          echo "run_url=$run_url" >> "$GITHUB_OUTPUT"
-          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
-          echo "artifact_name=$artifact_name" >> "$GITHUB_OUTPUT"
-          echo "artifact_id=$artifact_id" >> "$GITHUB_OUTPUT"
-          echo "artifact_url=$artifact_url" >> "$GITHUB_OUTPUT"
-          echo "artifact_size=$artifact_size_display" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=$version"
+            echo "tag=$release_tag"
+            echo "run_id=$run_id"
+            echo "run_url=$run_url"
+            echo "source_sha=$source_sha"
+            echo "artifact_name=$artifact_name"
+            echo "artifact_id=$artifact_id"
+            echo "artifact_url=$artifact_url"
+            echo "artifact_size=$artifact_size_display"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Releasing OmniOS $version as $release_tag from build run $run_id ($source_sha)."
 
       - name: Generate release notes
         env:
           VERSION: ${{ steps.build.outputs.version }}
+          RELEASE_TAG: ${{ steps.build.outputs.tag }}
           BUILD_SHA: ${{ steps.build.outputs.source_sha }}
           BUILD_RUN_ID: ${{ steps.build.outputs.run_id }}
           BUILD_RUN_URL: ${{ steps.build.outputs.run_url }}
@@ -88,11 +154,14 @@ jobs:
               found && /^## \[/ { exit }
               found { print }
               END { if (!found) exit 1 }
-          ' build-changelog.md > release-changes.md
+          ' build-changelog.md > release-changes.md || {
+            echo "CHANGELOG.md at $BUILD_SHA has no \"## [$VERSION]\" section." >&2
+            exit 1
+          }
           test -s release-changes.md
 
           cat > release-notes.md <<EOF
-          # OmniOS $VERSION
+          # OmniOS $RELEASE_TAG
 
           EOF
           cat release-changes.md >> release-notes.md
@@ -106,6 +175,8 @@ jobs:
 
           ## Build source
 
+          - Version: \`$VERSION\`
+          - Release tag: \`$RELEASE_TAG\`
           - Build run: [$BUILD_RUN_ID]($BUILD_RUN_URL)
           - Source commit: \`$BUILD_SHA\`
           - Architecture: amd64/x86-64
@@ -118,19 +189,51 @@ jobs:
           VERSION: ${{ steps.build.outputs.version }}
           RELEASE_TAG: ${{ steps.build.outputs.tag }}
           BUILD_SHA: ${{ steps.build.outputs.source_sha }}
+          MARK_LATEST: ${{ inputs.mark_latest }}
+          PRERELEASE: ${{ inputs.prerelease }}
         run: |
+          flags=()
+          if [[ "$MARK_LATEST" == "true" ]]; then
+            flags+=(--latest)
+          fi
+          if [[ "$PRERELEASE" == "true" ]]; then
+            flags+=(--prerelease)
+          fi
+
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            # An existing tag cannot be repointed, so --target is deliberately omitted here.
+            echo "Updating existing release $RELEASE_TAG."
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$BUILD_SHA" \
-              --title "OmniOS v$VERSION" \
+              --title "OmniOS $RELEASE_TAG" \
               --notes-file release-notes.md \
-              --latest
+              "${flags[@]}"
           else
+            echo "Creating release $RELEASE_TAG at $BUILD_SHA."
             gh release create "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$BUILD_SHA" \
-              --title "OmniOS v$VERSION" \
+              --title "OmniOS $RELEASE_TAG" \
               --notes-file release-notes.md \
-              --latest
+              "${flags[@]}"
           fi
+
+      - name: Summarize release
+        env:
+          VERSION: ${{ steps.build.outputs.version }}
+          RELEASE_TAG: ${{ steps.build.outputs.tag }}
+          BUILD_RUN_URL: ${{ steps.build.outputs.run_url }}
+          ARTIFACT_URL: ${{ steps.build.outputs.artifact_url }}
+          ARTIFACT_SIZE: ${{ steps.build.outputs.artifact_size }}
+        run: |
+          {
+            echo "## OmniOS $RELEASE_TAG published"
+            echo
+            echo "| Field | Value |"
+            echo "| --- | --- |"
+            echo "| Version | \`$VERSION\` |"
+            echo "| Release tag | \`$RELEASE_TAG\` |"
+            echo "| Release | https://github.com/$GITHUB_REPOSITORY/releases/tag/$RELEASE_TAG |"
+            echo "| Build run | $BUILD_RUN_URL |"
+            echo "| Download | $ARTIFACT_URL ($ARTIFACT_SIZE) |"
+          } >> "$GITHUB_STEP_SUMMARY"
