@@ -168,6 +168,13 @@ The version number you type selects the release, and the tag is that number pref
 version input: 2026.1   ->  release tag: v2026.1   ->  release title: OmniOS v2026.1
 ```
 
+Publishing a release requires the workflow token to have `contents: write`. The workflow declares that permission, but a repository whose **Settings → Actions → General → Workflow permissions** is set to *Read repository contents and packages permissions* caps the request, and the release step then fails with `HTTP 403: Resource not accessible by integration`. Fix it in one of two ways:
+
+- set **Workflow permissions** to **Read and write permissions**; or
+- create a fine-grained personal access token scoped to this repository with **Contents: Read and write**, and save it as the repository secret `RELEASE_TOKEN`. The workflow uses `RELEASE_TOKEN` automatically whenever the secret exists.
+
+After changing either setting, start a **new** run from the Actions tab. *Re-run jobs* reuses the permission context of the original run, so it keeps failing.
+
 The workflow then finds the newest successful `build.yml` run on the default branch **whose `version.txt` equals the requested version**, reads that build commit's changelog section, and links the release directly to its version-matched GitHub Actions artifact. If no successful build produced that version, the run fails and lists the versions that are actually available, so a release can never point at an ISO built from a different version. Releasing a version that already has a tag refreshes the existing release's title and notes in place.
 
 ## Release engineering

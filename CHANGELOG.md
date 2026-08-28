@@ -75,6 +75,8 @@ OmniOS Desktop 2026.1 is the first consumer desktop release in the year-based re
 - Added a release workflow version input: entering `2026.1` publishes the release as tag `v2026.1`, titled `OmniOS v2026.1`.
 - Added release selection by version number, so a release only ever links to an artifact built from that exact `version.txt`.
 - Added `mark_latest` and `prerelease` release options and a release job summary.
+- Added an optional `RELEASE_TOKEN` secret so releases can be published when the default workflow token is read-only.
+- Added actionable diagnostics when the release token is denied `contents: write`, instead of a bare HTTP 403.
 
 ### Fixed
 
