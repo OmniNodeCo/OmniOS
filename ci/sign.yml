@@ -1,0 +1,227 @@
+name: Create OmniOS signing key
+
+# Generates the GPG key that signs the OmniOS APT repository.
+#
+# Run this ONCE. The private key is never printed: it is encrypted with the
+# OMNIOS_KEY_PASSPHRASE secret before being uploaded, so the artifact is
+# useless to anyone who does not know that passphrase. The job also tries to
+# store the two release secrets for you, in which case there is nothing to
+# decode at all.
+
+on:
+  workflow_dispatch:
+    inputs:
+      key_name:
+        description: Name to put on the signing key
+        required: false
+        default: OmniOS Archive Signing Key
+        type: string
+      key_email:
+        description: Email to put on the signing key
+        required: false
+        default: omnios@omninodeco.invalid
+        type: string
+      expire:
+        description: 'Key lifetime: never, or a period such as 2y'
+        required: false
+        default: never
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: omnios-signing-key
+  cancel-in-progress: false
+
+jobs:
+  generate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Require a transport passphrase
+        env:
+          PASSPHRASE: ${{ secrets.OMNIOS_KEY_PASSPHRASE }}
+        run: |
+          if [[ -z "$PASSPHRASE" ]]; then
+            {
+              echo '::error title=OMNIOS_KEY_PASSPHRASE is not set::A passphrase is required to protect the generated key.'
+              echo 'The private key has to leave this runner somehow, and it must not travel'
+              echo 'in the clear. Create a strong passphrase, keep a copy in your password'
+              echo 'manager, and save it as a repository secret:'
+              echo
+              echo '  Settings -> Secrets and variables -> Actions -> New repository secret'
+              echo '  Name:  OMNIOS_KEY_PASSPHRASE'
+              echo '  Value: <a long random passphrase>'
+              echo
+              echo 'Then run this workflow again.'
+            } >&2
+            exit 1
+          fi
+          echo 'Transport passphrase is configured.'
+
+      - name: Generate the signing key
+        id: key
+        env:
+          KEY_NAME: ${{ inputs.key_name }}
+          KEY_EMAIL: ${{ inputs.key_email }}
+          EXPIRE: ${{ inputs.expire }}
+        run: |
+          # A dedicated keyring keeps this off the runner's default one.
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          install -d -m 0700 "$GNUPGHOME"
+
+          # The key itself has no passphrase so the release workflow can sign
+          # without interaction. Its confidentiality comes from being stored as
+          # an encrypted repository secret.
+          gpg --batch --yes --pinentry-mode loopback --passphrase '' \
+            --quick-generate-key "$KEY_NAME <$KEY_EMAIL>" default sign "$EXPIRE"
+
+          fingerprint="$(gpg --batch --with-colons --list-secret-keys \
+            | awk -F: '/^fpr:/ { print $10; exit }')"
+          [[ -n "$fingerprint" ]] || { echo 'Key generation failed.' >&2; exit 1; }
+
+          gpg --batch --yes --armor --export "$fingerprint" \
+            > "$RUNNER_TEMP/omnios-archive-keyring.asc"
+          gpg --batch --yes --pinentry-mode loopback --passphrase '' \
+            --armor --export-secret-keys "$fingerprint" \
+            > "$RUNNER_TEMP/private-key.asc"
+
+          echo "fingerprint=$fingerprint" >> "$GITHUB_OUTPUT"
+          echo "Generated signing key $fingerprint"
+
+      - name: Encrypt the private key for transport
+        env:
+          PASSPHRASE: ${{ secrets.OMNIOS_KEY_PASSPHRASE }}
+        run: |
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          install -d "$RUNNER_TEMP/outbox"
+
+          # Symmetric AES-256, so the artifact is only readable with the
+          # passphrase you already saved as a secret.
+          gpg --batch --yes --pinentry-mode loopback \
+            --passphrase "$PASSPHRASE" \
+            --symmetric --cipher-algo AES256 --armor \
+            --output "$RUNNER_TEMP/outbox/OMNIOS_GPG_PRIVATE_KEY.asc.gpg" \
+            "$RUNNER_TEMP/private-key.asc"
+
+          # The public key is not secret; it is what users verify against.
+          cp "$RUNNER_TEMP/omnios-archive-keyring.asc" "$RUNNER_TEMP/outbox/"
+
+          shred -u "$RUNNER_TEMP/private-key.asc"
+          ls -l "$RUNNER_TEMP/outbox"
+
+      - name: Try to store the secrets automatically
+        id: store
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GH_TOKEN || secrets.PAT_TOKEN || github.token }}
+          FINGERPRINT: ${{ steps.key.outputs.fingerprint }}
+        run: |
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+
+          # Setting a secret needs admin rights, which the built-in token does
+          # not have. When it works there is nothing left to do by hand.
+          private="$(gpg --batch --pinentry-mode loopback --passphrase '' \
+            --armor --export-secret-keys "$FINGERPRINT")"
+          echo '::add-mask::'"$private"
+
+          if printf '%s' "$private" \
+            | gh secret set OMNIOS_GPG_PRIVATE_KEY --repo "$GITHUB_REPOSITORY" 2>/dev/null \
+            && printf '%s' "$FINGERPRINT" \
+              | gh secret set OMNIOS_GPG_KEY_ID --repo "$GITHUB_REPOSITORY" 2>/dev/null; then
+            echo 'stored=true' >> "$GITHUB_OUTPUT"
+            echo 'Stored OMNIOS_GPG_PRIVATE_KEY and OMNIOS_GPG_KEY_ID automatically.'
+          else
+            echo 'stored=false' >> "$GITHUB_OUTPUT"
+            echo 'Could not set the secrets automatically; use the artifact instead.'
+          fi
+
+      - name: Upload the encrypted key
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnios-signing-key
+          path: ${{ runner.temp }}/outbox/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Explain what to do next
+        env:
+          FINGERPRINT: ${{ steps.key.outputs.fingerprint }}
+          STORED: ${{ steps.store.outputs.stored }}
+        run: |
+          if [[ "$STORED" == "true" ]]; then
+            cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## OmniOS signing key created
+
+          Key fingerprint: \`$FINGERPRINT\`
+
+          ### Nothing to decode
+
+          Both secrets were stored automatically, so the repository can be signed
+          right away:
+
+          - \`OMNIOS_GPG_KEY_ID\`
+          - \`OMNIOS_GPG_PRIVATE_KEY\`
+
+          Still download the **omnios-signing-key** artifact and keep
+          \`OMNIOS_GPG_PRIVATE_KEY.asc.gpg\` somewhere safe. It is your only backup:
+          lose the key and existing installations will reject every future update.
+          EOF
+          else
+            cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## OmniOS signing key created
+
+          Key fingerprint: \`$FINGERPRINT\`
+
+          ### How to decode the key
+
+          The secrets could not be set automatically, so add them by hand.
+
+          **1.** Download the **omnios-signing-key** artifact from this run and unzip it.
+
+          **2.** Decrypt the private key, using the passphrase you saved as
+          \`OMNIOS_KEY_PASSPHRASE\`:
+
+          \`\`\`bash
+          gpg --decrypt OMNIOS_GPG_PRIVATE_KEY.asc.gpg > private-key.asc
+          \`\`\`
+
+          GPG will prompt for the passphrase. To avoid the prompt, and to accept
+          the passphrase appearing in your shell history:
+
+          \`\`\`bash
+          gpg --batch --pinentry-mode loopback --passphrase 'YOUR_PASSPHRASE' \\
+            --decrypt OMNIOS_GPG_PRIVATE_KEY.asc.gpg > private-key.asc
+          \`\`\`
+
+          **3.** Add two repository secrets under
+          **Settings → Secrets and variables → Actions**:
+
+          | Secret | Value |
+          | --- | --- |
+          | \`OMNIOS_GPG_KEY_ID\` | \`$FINGERPRINT\` |
+          | \`OMNIOS_GPG_PRIVATE_KEY\` | the entire contents of \`private-key.asc\` |
+
+          Paste the private key in full, including the
+          \`-----BEGIN PGP PRIVATE KEY BLOCK-----\` and \`-----END ...\` lines.
+
+          **4.** Delete the decrypted copy:
+
+          \`\`\`bash
+          shred -u private-key.asc
+          \`\`\`
+          EOF
+          fi
+
+          cat >> "$GITHUB_STEP_SUMMARY" <<'EOF'
+
+          ### Then
+
+          Run **Build OmniOS APT repository** to publish a signed repository.
+
+          Commit the artifact's `omnios-archive-keyring.asc` to
+          `config/includes.chroot/usr/share/keyrings/` so installed systems can
+          verify what they download. That file is a public key and is not secret.
+          EOF

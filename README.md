@@ -168,8 +168,11 @@ scripts/render-logo.py          regenerates the OmniOS logo icons
 scripts/check-project.sh        static validation
 scripts/run-qemu.sh             interactive BIOS/UEFI test
 scripts/smoke-test.sh           automated boot validation
+packaging/omnios-desktop/       Debian packaging for the OmniOS files
 ci/build.yml                    owner-installable build workflow
 ci/release.yml                  owner-installable release workflow
+ci/package.yml                  owner-installable APT repository workflow
+ci/sign.yml                     owner-installable signing-key workflow
 ```
 
 ## CI workflows
@@ -179,6 +182,8 @@ Workflow templates remain under `ci/` so repository owners can review and instal
 ```bash
 cp ci/build.yml .github/workflows/build.yml
 cp ci/release.yml .github/workflows/release.yml
+cp ci/package.yml .github/workflows/package.yml
+cp ci/sign.yml .github/workflows/sign.yml
 git add .github/workflows
 git commit -m "ci: install Debian ISO workflows"
 git push
@@ -254,20 +259,37 @@ Installed systems carry `/etc/apt/sources.list.d/omnios.sources`, and `51omnios-
 
 ### One-time signing key setup
 
-APT rejects an unsigned repository, so the release workflow needs a signing key. Create one, then store it as repository secrets:
+APT rejects an unsigned repository, so OmniOS needs a signing key. The **Create OmniOS signing key** workflow generates one for you; you do not need GPG installed locally.
+
+First save a transport passphrase, which is used to encrypt the key on its way out of the runner:
+
+- **Settings → Secrets and variables → Actions → New repository secret**
+- Name `OMNIOS_KEY_PASSPHRASE`, value a long random passphrase. Keep a copy in your password manager.
+
+Then run **Create OmniOS signing key**. It generates the key, encrypts the private half with that passphrase, and uploads it as the `omnios-signing-key` artifact. It also tries to store the two release secrets for you automatically, in which case there is nothing further to do.
+
+If it could not store them, the run summary prints exact instructions. In short: download and unzip the artifact, then
 
 ```bash
-gpg --quick-generate-key "OmniOS Archive Signing Key <you@example.com>" default sign never
-gpg --list-secret-keys --keyid-format=long          # note the key id
-gpg --armor --export-secret-keys <KEY_ID>           # -> OMNIOS_GPG_PRIVATE_KEY
+gpg --decrypt OMNIOS_GPG_PRIVATE_KEY.asc.gpg > private-key.asc
 ```
+
+and add two repository secrets:
 
 | Secret | Value |
 | --- | --- |
-| `OMNIOS_GPG_KEY_ID` | The key id or fingerprint |
-| `OMNIOS_GPG_PRIVATE_KEY` | The armoured private key |
+| `OMNIOS_GPG_KEY_ID` | the fingerprint printed in the run summary |
+| `OMNIOS_GPG_PRIVATE_KEY` | the entire contents of `private-key.asc` |
 
-Publish `out/repo` at the URL in `omnios.sources` (GitHub Pages serves it directly). Until the secrets exist the release still succeeds, but it warns that existing installations will not receive the update.
+Then `shred -u private-key.asc`. Finally, commit the artifact's `omnios-archive-keyring.asc` to `config/includes.chroot/usr/share/keyrings/`, so installed systems can verify what they download. That file is a public key and is not secret.
+
+The private key is never written to a log, and the artifact is encrypted, so a leaked artifact is useless without the passphrase.
+
+### Publishing the repository
+
+**Build OmniOS APT repository** builds the package, verifies with a real `apt-get update` that APT resolves the expected version, and deploys to GitHub Pages. It runs automatically whenever `version.txt`, `config/includes.chroot/`, or the packaging changes, and can also be run by hand.
+
+Enable **Settings → Pages → Source: GitHub Actions** once. Until the signing secrets exist, the repository is still built and attached as an artifact, but publishing is skipped and the run warns that installed systems cannot use an unsigned repository.
 
 ### Shipping a change
 
