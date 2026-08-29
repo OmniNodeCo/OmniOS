@@ -1,10 +1,10 @@
-# OmniOS 2026.1
+# OmniOS 2026.1.1
 
-OmniOS 2026.1 is a normal, installable KDE Plasma desktop operating system based on **Debian 13 Stable (trixie)**. It is built as a hybrid live ISO for 64-bit PCs and is not an Ubuntu remaster, Yocto appliance image, or development-only environment.
+OmniOS 2026.1.1 is a normal, installable KDE Plasma desktop operating system based on **Debian 13 Stable (trixie)**. It is built as a hybrid live ISO for 64-bit PCs and is not an Ubuntu remaster, Yocto appliance image, or development-only environment.
 
 The live session and installed system use the same package set. Users can try the desktop from USB and install it with the Calamares graphical installer.
 
-See [CHANGELOG.md](CHANGELOG.md) for the complete 2026.1 release changelog.
+See [CHANGELOG.md](CHANGELOG.md) for the complete 2026.1.1 release changelog.
 
 ## Included system
 
@@ -37,7 +37,7 @@ This preserves normal Debian package management while providing practical recove
 
 ## Security and antivirus
 
-OmniOS 2026.1 enables AppArmor, auditd, firewalld, safer kernel/network defaults, Firefox tracking protection and HTTPS-only mode, automatic ClamAV definition updates, and a weekly low-priority antivirus scan while connected to AC power. Scans report suspicious files in `/var/log/omnios-antivirus.log` and never delete or quarantine user data automatically.
+OmniOS 2026.1.1 enables AppArmor, auditd, firewalld, safer kernel/network defaults, Firefox tracking protection and HTTPS-only mode, automatic ClamAV definition updates, and a weekly low-priority antivirus scan while connected to AC power. Scans report suspicious files in `/var/log/omnios-antivirus.log` and never delete or quarantine user data automatically.
 
 The **OmniOS Security Center** launches the graphical antivirus, firewall, password manager, Btrfs snapshot manager, Lynis audit, and software update interfaces. Advanced controls such as USB device blocking are not enabled by default because they could unexpectedly lock out ordinary desktop hardware.
 
@@ -46,12 +46,12 @@ The **OmniOS Security Center** launches the graphical antivirus, firewall, passw
 `version.txt` is the single source of truth for the OmniOS version. It contains one simple value such as:
 
 ```text
-2026.1
+2026.1.1
 ```
 
 Changing that value updates the generated OS identity, Calamares branding, ISO volume label, ISO filename, GitHub artifact ZIP name, QEMU defaults, release tag, and nightly download link. Add a matching `CHANGELOG.md` section before publishing a new version.
 
-Releases are tagged with a `v` prefix, so `version.txt` containing `2026.1` publishes as tag `v2026.1`.
+Releases are tagged with a `v` prefix, so `version.txt` containing `2026.1.1` publishes as tag `v2026.1.1`.
 
 ## Desktop identity and logo
 
@@ -93,13 +93,13 @@ scripts/bootstrap-host.sh
 scripts/build.sh build
 ```
 
-With `version.txt` set to `2026.1`, the output is:
+With `version.txt` set to `2026.1.1`, the output is:
 
 ```text
-out/OmniOS-2026.1-amd64.iso
-out/OmniOS-2026.1-amd64.iso.sha256
-out/OmniOS-2026.1-amd64.packages
-out/OmniOS-2026.1-amd64.iso-info.txt
+out/OmniOS-2026.1.1-amd64.iso
+out/OmniOS-2026.1.1-amd64.iso.sha256
+out/OmniOS-2026.1.1-amd64.packages
+out/OmniOS-2026.1.1-amd64.iso-info.txt
 ```
 
 The Debian package download cache is retained under `build/downloads/`. Do not use `scripts/build.sh clean --purge-cache` unless the cache itself is damaged.
@@ -109,7 +109,7 @@ The Debian package download cache is retained under `build/downloads/`. Do not u
 **Flashing destroys the selected device. Verify its path carefully.**
 
 ```bash
-sudo dd if=out/OmniOS-2026.1-amd64.iso of=/dev/sdX \
+sudo dd if=out/OmniOS-2026.1.1-amd64.iso of=/dev/sdX \
   bs=16M oflag=direct status=progress conv=fsync
 ```
 
@@ -176,14 +176,14 @@ Run **Release OmniOS ISO** from the Actions tab. It takes three optional inputs:
 
 | Input | Default | Meaning |
 | --- | --- | --- |
-| `version` | blank | Version number to publish, for example `2026.1`. A leading `v` is accepted and stripped. Leave blank to release whatever the latest successful build produced. |
+| `version` | blank | Version number to publish, for example `2026.1.1`. A leading `v` is accepted and stripped. Leave blank to release whatever the latest successful build produced. |
 | `mark_latest` | true | Mark the release as the repository's *Latest* release. |
 | `prerelease` | false | Publish as a pre-release instead. |
 
 The version number you type selects the release, and the tag is that number prefixed with `v`:
 
 ```text
-version input: 2026.1   ->  release tag: v2026.1   ->  release title: OmniOS v2026.1
+version input: 2026.1.1   ->  release tag: v2026.1.1   ->  release title: OmniOS v2026.1.1
 ```
 
 Publishing a release requires the workflow token to have `contents: write`. The workflow declares that permission, but a repository whose **Settings → Actions → General → Workflow permissions** is set to *Read repository contents and packages permissions* caps the request, and the release step then fails with `HTTP 403: Resource not accessible by integration`. Fix it in one of two ways:
@@ -206,17 +206,17 @@ The workflow then finds the newest successful `build.yml` run on the default bra
 A single GitHub release asset must stay under **2 GiB**, and the OmniOS ISO is larger than that, so the workflow attaches it as split parts and publishes the checksums alongside them:
 
 ```text
-OmniOS-2026.1-amd64.iso.part00      first 1900 MiB
-OmniOS-2026.1-amd64.iso.part01      remainder
-OmniOS-2026.1-amd64.iso.sha256      checksum of the rejoined ISO
-OmniOS-2026.1-amd64.iso-parts.sha256  checksums of the individual parts
+OmniOS-2026.1.1-amd64.iso.part00      first 1900 MiB
+OmniOS-2026.1.1-amd64.iso.part01      remainder
+OmniOS-2026.1.1-amd64.iso.sha256      checksum of the rejoined ISO
+OmniOS-2026.1.1-amd64.iso-parts.sha256  checksums of the individual parts
 ```
 
 Download every part into one folder and rejoin them:
 
 ```bash
-cat OmniOS-2026.1-amd64.iso.part* > OmniOS-2026.1-amd64.iso
-sha256sum --check OmniOS-2026.1-amd64.iso.sha256
+cat OmniOS-2026.1.1-amd64.iso.part* > OmniOS-2026.1.1-amd64.iso
+sha256sum --check OmniOS-2026.1.1-amd64.iso.sha256
 ```
 
 The parts checksum file is deliberately named `.iso-parts.sha256` rather than `.iso.parts.sha256` so that it does **not** match the `*.iso.part*` glob used to rejoin the image. If the ISO ever drops below 2 GiB, the workflow attaches it as a single `.iso` file instead, with no further action required.
@@ -231,7 +231,7 @@ Before a public release:
 4. test Wi-Fi, Bluetooth, sound, suspend/resume, graphics, and disk encryption;
 5. test a Btrfs snapshot and recovery procedure;
 6. confirm the checksum, package manifest, and direct build-artifact download are available;
-7. run **Release OmniOS ISO** and enter the version number, for example `2026.1`, to publish tag `v2026.1`.
+7. run **Release OmniOS ISO** and enter the version number, for example `2026.1.1`, to publish tag `v2026.1.1`.
 
 ## Licensing
 

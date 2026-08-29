@@ -2,6 +2,24 @@
 
 All notable changes to OmniOS Desktop are documented in this file.
 
+## [2026.1.1] - 2026-08-29
+
+OmniOS Desktop 2026.1.1 is a maintenance release. It corrects the operating-system identity shown on the desktop and improves how images are published, with no change to the package selection or desktop layout of 2026.1.
+
+### Fixed
+
+- Fixed KDE's About this System page showing the Debian swirl instead of the OmniOS logo. `os-release` now sets `LOGO=omnios-logo`, and the OmniOS ring is installed into the hicolor icon theme from 16 to 512 px plus a scalable SVG.
+- Fixed the same page reporting the Debian base release, such as `OmniOS 13`, instead of the OmniOS version. An explicit `/etc/xdg/kcm-about-distrorc` now states the OmniOS name, version, and logo with `UseOSReleaseVersion=false`, so the heading survives a `base-files` upgrade.
+
+### Build and release engineering
+
+- Added `scripts/render-logo.py`, which generates every logo icon from source so the artwork can be restyled without editing binaries.
+- Added `hicolor-icon-theme` to guarantee the icon theme directory exists.
+- Extended validation to reject an `os-release` that loses the OmniOS identity, hardcodes a version, or names a logo with no installed icon.
+- Added a release workflow version input, so entering `2026.1.1` publishes tag `v2026.1.1` titled `OmniOS v2026.1.1`, and releases only ever resolve an artifact built from that exact version.
+- Added automatic download of the ISO from the matching build run and attachment of it to the release, split into sub-2-GiB assets, so downloads no longer require signing in to GitHub.
+- Added token auto-selection, a permission preflight, and a tag fallback so releases publish with whichever configured token genuinely works.
+
 ## [2026.1] - 2026-08-24
 
 OmniOS Desktop 2026.1 is the first consumer desktop release in the year-based release series. It replaces the former appliance-oriented image with a conventional live and installable PC operating system.
