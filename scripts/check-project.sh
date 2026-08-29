@@ -7,6 +7,8 @@ required=(
     auto/config
     branding/boot-splash.svg
     scripts/read-version.sh
+    scripts/build-vars.sh
+    scripts/verify-iso.sh
     config/package-lists/omnios.list.chroot
     config/hooks/normal/0500-omnios-config.hook.chroot
     config/includes.chroot/usr/share/omnios/identity/os-release

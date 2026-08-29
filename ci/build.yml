@@ -30,16 +30,43 @@ jobs:
       - name: Check out OmniOS
         uses: actions/checkout@v5
 
+      - name: Check the installed workflow is current
+        run: |
+          # .github/workflows/ cannot be written by the automation that
+          # maintains ci/, so an outdated copy silently keeps building the
+          # previous version. Detect that here instead of failing later with a
+          # confusing "no such file" on a stale ISO name.
+          if ! diff -q ci/build.yml .github/workflows/build.yml >/dev/null 2>&1; then
+            {
+              echo '::error title=Installed build workflow is out of date::'\
+          '.github/workflows/build.yml differs from ci/build.yml.'
+              echo 'The running workflow is not the one in the repository, so it may still'
+              echo 'reference an older OmniOS version. Reinstall it with:'
+              echo
+              echo '  cp ci/build.yml .github/workflows/build.yml'
+              echo '  cp ci/release.yml .github/workflows/release.yml'
+              echo '  git add .github/workflows && git commit -m "ci: sync workflows" && git push'
+              echo
+              echo 'Differences:'
+              diff ci/build.yml .github/workflows/build.yml || true
+            } >&2
+            exit 1
+          fi
+          echo 'Installed build workflow matches ci/build.yml.'
+
       - name: Configure version and nightly download
         run: |
-          version="$(scripts/read-version.sh)"
-          artifact_name="OmniOS-${version}-amd64"
+          # Every name comes from version.txt via scripts/build-vars.sh, so
+          # this workflow never hardcodes a version and cannot drift from the
+          # ISO the build actually produces.
+          scripts/build-vars.sh --github-env
+
+          artifact_name="$(scripts/build-vars.sh OMNIOS_ARTIFACT)"
           encoded_ref="$(jq -rn --arg value "$GITHUB_REF_NAME" '$value | @uri')"
           nightly_url="https://nightly.link/${GITHUB_REPOSITORY}/workflows/build/${encoded_ref}/${artifact_name}.zip"
-
-          echo "OMNIOS_VERSION=$version" >> "$GITHUB_ENV"
-          echo "OMNIOS_ARTIFACT=$artifact_name" >> "$GITHUB_ENV"
           echo "OMNIOS_NIGHTLY_URL=$nightly_url" >> "$GITHUB_ENV"
+
+          echo "Building OmniOS $(scripts/build-vars.sh OMNIOS_VERSION) as $artifact_name"
 
       - name: Free runner disk space
         run: |
@@ -69,9 +96,7 @@ jobs:
 
       - name: Verify ISO checksum
         if: inputs.full_build
-        run: |
-          cd out
-          sha256sum --check "$OMNIOS_ARTIFACT.iso.sha256"
+        run: scripts/verify-iso.sh
 
       - name: Boot smoke test (legacy BIOS)
         if: inputs.full_build && inputs.run_boot_tests

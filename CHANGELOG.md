@@ -13,6 +13,8 @@ OmniOS Desktop 2026.1.1 is a maintenance release. It corrects the operating-syst
 
 ### Build and release engineering
 
+- Added `scripts/build-vars.sh` and `scripts/verify-iso.sh`, so the ISO name, checksum filename, and release tag are derived from `version.txt` by the repository rather than repeated inside the CI workflow.
+- Added a build-workflow check that fails immediately when the installed `.github/workflows/build.yml` differs from `ci/build.yml`, instead of failing later with a missing-file error for a stale version.
 - Added `scripts/render-logo.py`, which generates every logo icon from source so the artwork can be restyled without editing binaries.
 - Added `hicolor-icon-theme` to guarantee the icon theme directory exists.
 - Extended validation to reject an `os-release` that loses the OmniOS identity, hardcodes a version, or names a logo with no installed icon.

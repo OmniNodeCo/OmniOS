@@ -53,6 +53,20 @@ Changing that value updates the generated OS identity, Calamares branding, ISO v
 
 Releases are tagged with a `v` prefix, so `version.txt` containing `2026.1.1` publishes as tag `v2026.1.1`.
 
+Every version-derived name is produced by one script, so nothing in the build or CI has to repeat it:
+
+```bash
+$ scripts/build-vars.sh
+OMNIOS_VERSION=2026.1.1
+OMNIOS_ARCH=amd64
+OMNIOS_ARTIFACT=OmniOS-2026.1.1-amd64
+OMNIOS_ISO=OmniOS-2026.1.1-amd64.iso
+OMNIOS_ISO_SHA256=OmniOS-2026.1.1-amd64.iso.sha256
+OMNIOS_RELEASE_TAG=v2026.1.1
+```
+
+The build workflow calls `scripts/build-vars.sh --github-env` to export these, and `scripts/verify-iso.sh` to check the ISO against its checksum. Because both live in the repository rather than inside the workflow YAML, changing `version.txt` is genuinely the only edit needed to build a new version.
+
 ## Desktop identity and logo
 
 OmniOS replaces the Debian identity everywhere the desktop shows it. `config/includes.chroot/usr/share/omnios/identity/os-release` is installed over `/usr/lib/os-release` through a `dpkg-divert`, so a future `base-files` upgrade cannot restore the Debian name, version, or artwork.
@@ -148,6 +162,8 @@ config/includes.chroot/         files placed in the live and installed system
 config/hooks/normal/            post-package configuration and cleanup
 scripts/build.sh                direct Debian live-build wrapper
 scripts/build-container.sh      recommended Debian 13 container build
+scripts/build-vars.sh           version-derived names shared with CI
+scripts/verify-iso.sh           checksum verification of the built ISO
 scripts/render-logo.py          regenerates the OmniOS logo icons
 scripts/check-project.sh        static validation
 scripts/run-qemu.sh             interactive BIOS/UEFI test
