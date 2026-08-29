@@ -1,0 +1,55 @@
+#!/bin/bash
+# Apply the OmniOS identity after the package is installed or upgraded.
+#
+# This mirrors config/hooks/normal/0500-omnios-config.hook.chroot, which does
+# the same work when the ISO is built. Keeping both in step means an installed
+# system and a freshly built ISO end up identical.
+set -Eeuo pipefail
+
+case "${1:-}" in
+    configure) ;;
+    abort-upgrade | abort-remove | abort-deconfigure) exit 0 ;;
+    *) exit 0 ;;
+esac
+
+# Preserve the OmniOS identity across future base-files upgrades. Debian's
+# original os-release stays available at /usr/lib/os-release.debian.
+if ! dpkg-divert --list /usr/lib/os-release | grep -q /usr/lib/os-release; then
+    dpkg-divert --package omnios-desktop --add --rename \
+        --divert /usr/lib/os-release.debian /usr/lib/os-release
+fi
+install -m 0644 /usr/share/omnios/identity/os-release /usr/lib/os-release
+install -m 0644 /usr/share/omnios/identity/omnios-release /etc/omnios-release
+install -m 0644 /usr/share/omnios/identity/issue /etc/issue
+install -m 0644 /usr/share/omnios/identity/motd /etc/motd
+install -m 0644 /usr/share/omnios/identity/lsb-release /etc/lsb-release
+ln -sfn ../usr/lib/os-release /etc/os-release
+
+# KDE's "About this System" page reads /etc/os-release, which base-files also
+# owns. State the OmniOS name, version and logo explicitly.
+install -d /etc/xdg
+install -m 0644 /usr/share/omnios/identity/kcm-about-distrorc \
+    /etc/xdg/kcm-about-distrorc
+
+# Refresh the icon cache so the OmniOS logo resolves by name everywhere.
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache --force --quiet /usr/share/icons/hicolor || true
+fi
+
+install -d /etc/default/grub.d
+cat > /etc/default/grub.d/10-omnios.cfg <<'GRUB'
+GRUB_DISTRIBUTOR="OmniOS"
+GRUB_TIMEOUT_STYLE=menu
+GRUB_TIMEOUT=5
+GRUB_DISABLE_RECOVERY=false
+GRUB
+
+# Only refresh the bootloader on a real installed system, never in a chroot or
+# on live media, where update-grub would target the build host.
+if [[ -d /boot/grub ]] && [[ ! -d /run/live ]] && command -v update-grub >/dev/null 2>&1; then
+    update-grub || true
+fi
+
+#DEBHELPER#
+
+exit 0

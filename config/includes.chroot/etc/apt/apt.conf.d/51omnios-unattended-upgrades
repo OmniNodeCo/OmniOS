@@ -2,6 +2,10 @@ Unattended-Upgrade::Origins-Pattern {
     "origin=Debian,codename=trixie,label=Debian";
     "origin=Debian,codename=trixie-updates,label=Debian";
     "origin=Debian,codename=trixie-security,label=Debian-Security";
+    // OmniOS's own updates, so desktop identity, branding and system
+    // integration changes reach installed systems automatically instead of
+    // only through a new ISO.
+    "origin=OmniOS,label=OmniOS";
 };
 Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
 Unattended-Upgrade::Remove-New-Unused-Dependencies "true";

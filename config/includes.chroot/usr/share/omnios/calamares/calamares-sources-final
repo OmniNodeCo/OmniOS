@@ -13,3 +13,17 @@ deb https://security.debian.org/debian-security trixie-security main contrib non
 # Optional newer packages built for Debian Stable.
 deb https://deb.debian.org/debian trixie-backports main contrib non-free-firmware
 SOURCES
+
+# Carry the OmniOS repository and its signing key onto the installed system.
+# Without this the installation would only ever receive Debian updates, and
+# OmniOS's own changes would require reinstalling from a newer ISO.
+if [ -f /etc/apt/sources.list.d/omnios.sources ]; then
+    mkdir -p "$CHROOT/etc/apt/sources.list.d"
+    cp /etc/apt/sources.list.d/omnios.sources \
+        "$CHROOT/etc/apt/sources.list.d/omnios.sources"
+fi
+if [ -f /usr/share/keyrings/omnios-archive-keyring.asc ]; then
+    mkdir -p "$CHROOT/usr/share/keyrings"
+    cp /usr/share/keyrings/omnios-archive-keyring.asc \
+        "$CHROOT/usr/share/keyrings/omnios-archive-keyring.asc"
+fi

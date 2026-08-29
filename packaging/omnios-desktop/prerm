@@ -1,0 +1,24 @@
+#!/bin/bash
+# Hand the operating-system identity back to Debian when OmniOS branding is
+# removed, so the system is left in a working state rather than with a
+# dangling diverted file.
+set -Eeuo pipefail
+
+case "${1:-}" in
+    remove | deconfigure)
+        rm -f /etc/xdg/kcm-about-distrorc
+        rm -f /etc/default/grub.d/10-omnios.cfg
+        rm -f /usr/lib/os-release
+        if dpkg-divert --list /usr/lib/os-release | grep -q /usr/lib/os-release; then
+            dpkg-divert --package omnios-desktop --remove --rename \
+                --divert /usr/lib/os-release.debian /usr/lib/os-release
+        fi
+        ln -sfn ../usr/lib/os-release /etc/os-release
+        ;;
+    upgrade | failed-upgrade) ;;
+    *) ;;
+esac
+
+#DEBHELPER#
+
+exit 0

@@ -1,0 +1,11 @@
+# OmniOS updates.
+#
+# This is what lets an installed OmniOS system receive OmniOS's own changes
+# through ordinary automatic updates. Debian packages continue to come from
+# Debian; only the omnios-desktop package comes from here.
+Types: deb
+URIs: https://omninodeco.github.io/OmniOS/repo
+Suites: stable
+Components: main
+Architectures: amd64
+Signed-By: /usr/share/keyrings/omnios-archive-keyring.asc

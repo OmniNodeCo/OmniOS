@@ -9,6 +9,11 @@ required=(
     scripts/read-version.sh
     scripts/build-vars.sh
     scripts/verify-iso.sh
+    scripts/build-package.sh
+    scripts/build-apt-repo.sh
+    packaging/omnios-desktop/control.in
+    packaging/omnios-desktop/postinst
+    config/includes.chroot/etc/apt/sources.list.d/omnios.sources
     config/package-lists/omnios.list.chroot
     config/hooks/normal/0500-omnios-config.hook.chroot
     config/includes.chroot/usr/share/omnios/identity/os-release
@@ -71,6 +76,25 @@ if len(rendered) < 2:
 for path in rendered:
     if path.suffix == '.png' and path.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n':
         raise SystemExit(f'not a valid PNG: {path.relative_to(root)}')
+# Everything the omnios-desktop package claims to ship must exist in the ISO
+# tree, otherwise installed systems and the ISO would drift apart.
+package_script = root.joinpath('scripts/build-package.sh').read_text(encoding='utf-8')
+payload = re.search(r'readonly PAYLOAD=\((.*?)\n\)', package_script, re.S)
+if not payload:
+    raise SystemExit('could not read PAYLOAD from scripts/build-package.sh')
+includes = root.joinpath('config/includes.chroot')
+for entry in payload.group(1).split():
+    if not includes.joinpath(entry).exists():
+        raise SystemExit(f'omnios-desktop packages a missing path: {entry}')
+
+# unattended-upgrades has to accept the OmniOS origin, or published updates
+# would never install automatically.
+uu = root.joinpath(
+    'config/includes.chroot/etc/apt/apt.conf.d/51omnios-unattended-upgrades'
+).read_text(encoding='utf-8')
+if 'origin=OmniOS' not in uu:
+    raise SystemExit('unattended-upgrades does not allow the OmniOS origin')
+
 for path in root.joinpath('config').rglob('*.json'):
     json.loads(path.read_text(encoding='utf-8'))
 for path in root.joinpath('branding').rglob('*.svg'):

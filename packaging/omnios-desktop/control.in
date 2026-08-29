@@ -1,0 +1,18 @@
+Package: omnios-desktop
+Version: @OMNIOS_VERSION@
+Architecture: all
+Maintainer: OmniNodeCo <https://github.com/OmniNodeCo/OmniOS>
+Section: metapackages
+Priority: optional
+Depends: systemd, hicolor-icon-theme
+Recommends: unattended-upgrades, apt-config-icons
+Homepage: https://github.com/OmniNodeCo/OmniOS
+Description: OmniOS desktop identity, branding and system integration
+ OmniOS Desktop is a consumer KDE Plasma operating system based on Debian 13
+ Stable. This package carries the parts of OmniOS that are not Debian packages:
+ the operating-system identity, the logo and wallpaper, the Plasma defaults,
+ the Security Center launcher, the antivirus and snapshot helpers, and the
+ desktop-safe hardening defaults.
+ .
+ Shipping them as a package means an installed OmniOS system receives OmniOS
+ changes through ordinary automatic updates, instead of only through a new ISO.

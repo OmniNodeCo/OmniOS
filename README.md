@@ -237,6 +237,46 @@ sha256sum --check OmniOS-2026.1.1-amd64.iso.sha256
 
 The parts checksum file is deliberately named `.iso-parts.sha256` rather than `.iso.parts.sha256` so that it does **not** match the `*.iso.part*` glob used to rejoin the image. If the ISO ever drops below 2 GiB, the workflow attaches it as a single `.iso` file instead, with no further action required.
 
+## Updating installed systems
+
+Automatic updates cover two different things, and they arrive by different routes.
+
+**Debian packages** — Firefox, KDE, the kernel, security fixes — are installed automatically by `unattended-upgrades` from Debian's own archives. Nothing extra is required.
+
+**OmniOS's own changes** — the identity, logo, wallpaper, Plasma defaults, Security Center, and the antivirus and snapshot helpers — are not Debian packages. They are shipped in the `omnios-desktop` package, built from exactly the same `config/includes.chroot` tree the ISO is built from:
+
+```bash
+scripts/build-package.sh    # -> out/omnios-desktop_<version>_all.deb
+scripts/build-apt-repo.sh   # -> out/repo, a signed APT repository
+```
+
+Installed systems carry `/etc/apt/sources.list.d/omnios.sources`, and `51omnios-unattended-upgrades` allows the `origin=OmniOS` archive, so a published `omnios-desktop` upgrade installs itself the same way a Debian security update does. Without this, an OmniOS change would only reach people who reinstall from a newer ISO.
+
+### One-time signing key setup
+
+APT rejects an unsigned repository, so the release workflow needs a signing key. Create one, then store it as repository secrets:
+
+```bash
+gpg --quick-generate-key "OmniOS Archive Signing Key <you@example.com>" default sign never
+gpg --list-secret-keys --keyid-format=long          # note the key id
+gpg --armor --export-secret-keys <KEY_ID>           # -> OMNIOS_GPG_PRIVATE_KEY
+```
+
+| Secret | Value |
+| --- | --- |
+| `OMNIOS_GPG_KEY_ID` | The key id or fingerprint |
+| `OMNIOS_GPG_PRIVATE_KEY` | The armoured private key |
+
+Publish `out/repo` at the URL in `omnios.sources` (GitHub Pages serves it directly). Until the secrets exist the release still succeeds, but it warns that existing installations will not receive the update.
+
+### Shipping a change
+
+1. edit the files under `config/includes.chroot/`;
+2. bump `version.txt` and add its `CHANGELOG.md` section;
+3. run **Build OmniOS ISO**, then **Release OmniOS ISO**.
+
+New installs get the change from the ISO, and existing installs get it from the APT repository within a day, on the normal `unattended-upgrades` schedule. `scripts/check-project.sh` verifies that every path the package claims to ship exists in the ISO tree, so the two cannot drift apart.
+
 ## Release engineering
 
 Before a public release:
