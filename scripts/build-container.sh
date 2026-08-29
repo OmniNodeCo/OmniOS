@@ -17,6 +17,18 @@ exec docker run --rm --privileged \
     debian:13-slim \
     bash -Eeuo pipefail -c '
         export DEBIAN_FRONTEND=noninteractive
+
+        # deb.debian.org is a CDN and occasionally drops a connection mid
+        # transfer. Without retries a single broken pipe fails a build that
+        # downloads several thousand packages.
+        cat > /etc/apt/apt.conf.d/80-omnios-retries <<APT
+Acquire::Retries "10";
+Acquire::http::Timeout "120";
+Acquire::https::Timeout "120";
+Acquire::http::Pipeline-Depth "0";
+Acquire::Queue-Host "2";
+APT
+
         if [[ -f /etc/apt/sources.list.d/debian.sources ]]; then
             sed -i "s/^Components: main$/Components: main contrib non-free-firmware/" \
                 /etc/apt/sources.list.d/debian.sources

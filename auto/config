@@ -26,6 +26,8 @@ lb config noauto \
     --backports false \
     --apt-recommends true \
     --apt-secure true \
+    --apt-options "--yes -o Acquire::Retries=10 -o Acquire::http::Timeout=120 -o Acquire::https::Timeout=120 -o Acquire::Queue-Host=2" \
+    --apt-pipeline 0 \
     --binary-image iso-hybrid \
     --bootloaders "syslinux grub-efi" \
     --debian-installer none \
