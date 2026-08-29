@@ -10,6 +10,8 @@ required=(
     config/package-lists/omnios.list.chroot
     config/hooks/normal/0500-omnios-config.hook.chroot
     config/includes.chroot/usr/share/omnios/identity/os-release
+    config/includes.chroot/usr/share/omnios/identity/kcm-about-distrorc
+    config/includes.chroot/usr/share/icons/hicolor/scalable/apps/omnios-logo.svg
     config/includes.chroot/usr/share/applications/install-omnios.desktop
     config/includes.chroot/usr/share/omnios/calamares/branding/omnios/branding.desc
     config/includes.chroot/usr/share/wallpapers/OmniOS/contents/images/3840x2160.jpg
@@ -34,6 +36,7 @@ if not re.fullmatch(r'[0-9]{4}\.[0-9]+(?:\.[0-9]+)?', version):
 identity = root.joinpath('config/includes.chroot/usr/share/omnios/identity')
 versioned_files = (
     identity.joinpath('issue'),
+    identity.joinpath('kcm-about-distrorc'),
     identity.joinpath('lsb-release'),
     identity.joinpath('motd'),
     identity.joinpath('omnios-release'),
@@ -43,6 +46,29 @@ versioned_files = (
 for path in versioned_files:
     if '@OMNIOS_VERSION@' not in path.read_text(encoding='utf-8'):
         raise SystemExit(f'missing version placeholder: {path.relative_to(root)}')
+
+# The desktop must identify itself as OmniOS, never as the Debian base.
+os_release = dict(
+    line.split('=', 1)
+    for line in identity.joinpath('os-release').read_text(encoding='utf-8').splitlines()
+    if '=' in line and not line.startswith('#')
+)
+for key, expected in (('NAME', '"OmniOS"'), ('ID', 'omnios'), ('LOGO', 'omnios-logo')):
+    if os_release.get(key) != expected:
+        raise SystemExit(f'os-release {key} must be {expected}, found {os_release.get(key)!r}')
+if os_release.get('VERSION_ID') != '"@OMNIOS_VERSION@"':
+    raise SystemExit('os-release VERSION_ID must use the OmniOS version placeholder')
+
+# The logo named by os-release has to actually exist, or the desktop falls
+# back to the Debian swirl.
+logo = os_release['LOGO']
+icons = root.joinpath('config/includes.chroot/usr/share/icons/hicolor')
+rendered = sorted(icons.glob(f'*/apps/{logo}.png')) + sorted(icons.glob(f'scalable/apps/{logo}.svg'))
+if len(rendered) < 2:
+    raise SystemExit(f'no icons installed for LOGO={logo}')
+for path in rendered:
+    if path.suffix == '.png' and path.read_bytes()[:8] != b'\x89PNG\r\n\x1a\n':
+        raise SystemExit(f'not a valid PNG: {path.relative_to(root)}')
 for path in root.joinpath('config').rglob('*.json'):
     json.loads(path.read_text(encoding='utf-8'))
 for path in root.joinpath('branding').rglob('*.svg'):

@@ -53,6 +53,23 @@ Changing that value updates the generated OS identity, Calamares branding, ISO v
 
 Releases are tagged with a `v` prefix, so `version.txt` containing `2026.1` publishes as tag `v2026.1`.
 
+## Desktop identity and logo
+
+OmniOS replaces the Debian identity everywhere the desktop shows it. `config/includes.chroot/usr/share/omnios/identity/os-release` is installed over `/usr/lib/os-release` through a `dpkg-divert`, so a future `base-files` upgrade cannot restore the Debian name, version, or artwork.
+
+Two details make KDE's **System Settings → About this System** page show OmniOS rather than the Debian swirl and the Debian release number:
+
+- `LOGO=omnios-logo` in `os-release`, resolved against the icons in `config/includes.chroot/usr/share/icons/hicolor/`. Without a `LOGO` key and a matching installed icon, KDE falls back to the Debian logo.
+- `/etc/xdg/kcm-about-distrorc`, which states the OmniOS name, version, and logo path explicitly and sets `UseOSReleaseVersion=false`.
+
+The logo is generated from source rather than committed as an opaque binary:
+
+```bash
+scripts/render-logo.py
+```
+
+That writes the OmniOS ring in 16–512 px PNGs plus a scalable SVG. Edit the colours or geometry at the top of the script and re-run it to restyle every icon at once. `scripts/check-project.sh` verifies that `os-release` still identifies OmniOS, that `LOGO` names an icon that actually exists, and that each rendered PNG is valid.
+
 ## Build requirements
 
 The recommended build runs inside a privileged Debian 13 container so the host distribution does not affect live-build:
@@ -131,6 +148,7 @@ config/includes.chroot/         files placed in the live and installed system
 config/hooks/normal/            post-package configuration and cleanup
 scripts/build.sh                direct Debian live-build wrapper
 scripts/build-container.sh      recommended Debian 13 container build
+scripts/render-logo.py          regenerates the OmniOS logo icons
 scripts/check-project.sh        static validation
 scripts/run-qemu.sh             interactive BIOS/UEFI test
 scripts/smoke-test.sh           automated boot validation

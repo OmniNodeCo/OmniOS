@@ -86,6 +86,9 @@ OmniOS Desktop 2026.1 is the first consumer desktop release in the year-based re
 
 ### Fixed
 
+- Fixed the desktop showing the Debian swirl instead of the OmniOS logo in KDE's About this System page, by adding a `LOGO` key to `os-release` and installing OmniOS icons into the hicolor theme.
+- Fixed the About this System page reporting the Debian base release, such as `OmniOS 13`, instead of the OmniOS version, by adding an explicit `kcm-about-distrorc` with `UseOSReleaseVersion=false`.
+- Added `scripts/render-logo.py` so the logo icons are generated from source, and extended validation to reject an os-release that loses the OmniOS identity or names a missing logo.
 - Corrected the Debian package selection for KDE Spectacle from `spectacle` to `kde-spectacle`.
 - Fixed live-build cache linking for clean and repeatable container builds.
 - Fixed live media waiting indefinitely at the boot menu during automated smoke tests.

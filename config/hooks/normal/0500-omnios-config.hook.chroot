@@ -13,6 +13,22 @@ install -m 0644 /usr/share/omnios/identity/issue /etc/issue
 install -m 0644 /usr/share/omnios/identity/motd /etc/motd
 install -m 0644 /usr/share/omnios/identity/lsb-release /etc/lsb-release
 ln -sfn ../usr/lib/os-release /etc/os-release
+
+# KDE's "About this System" page reads /etc/os-release, which Debian's
+# base-files package also owns. State the OmniOS name, version and logo
+# explicitly so the page cannot fall back to the Debian identity or the
+# Debian swirl.
+install -d /etc/xdg
+install -m 0644 /usr/share/omnios/identity/kcm-about-distrorc \
+    /etc/xdg/kcm-about-distrorc
+
+# /etc/debian_version is deliberately left alone: it records the Debian base
+# release and package tooling parses it as such.
+
+# Refresh the icon cache so the OmniOS logo resolves by name everywhere.
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+    gtk-update-icon-cache --force --quiet /usr/share/icons/hicolor || true
+fi
 printf 'omnios\n' > /etc/hostname
 if [[ -f /etc/hosts ]] && ! grep -qE '^127\.0\.1\.1[[:space:]]+omnios' /etc/hosts; then
     printf '127.0.1.1 omnios\n' >> /etc/hosts

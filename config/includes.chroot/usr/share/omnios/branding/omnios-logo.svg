@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <title>OmniOS</title>
+  <circle cx="128" cy="128" r="104.4" fill="none"
+          stroke="#4FD3F4" stroke-width="26.6"/>
+  <circle cx="128" cy="128" r="63.2" fill="none"
+          stroke="#1E6E8C" stroke-width="11.8"/>
+</svg>

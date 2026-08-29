@@ -3,6 +3,7 @@ live-task-base
 live-task-recommended
 task-kde-desktop
 calamares-settings-debian
+hicolor-icon-theme
 
 # Kernel, microcode, graphics, Wi-Fi, Bluetooth, and other PC firmware
 linux-image-amd64

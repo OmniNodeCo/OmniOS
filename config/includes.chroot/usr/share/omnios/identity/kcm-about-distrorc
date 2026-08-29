@@ -1,0 +1,12 @@
+# KDE "About this System" branding for OmniOS.
+#
+# KInfoCenter derives the heading from /etc/os-release, which Debian's
+# base-files package also owns. Stating the OmniOS name, version and logo
+# explicitly here keeps the page correct even if a base-files upgrade ever
+# restores Debian's own os-release.
+[General]
+Name=OmniOS
+Version=@OMNIOS_VERSION@
+Website=https://github.com/OmniNodeCo/OmniOS
+LogoPath=/usr/share/icons/hicolor/256x256/apps/omnios-logo.png
+UseOSReleaseVersion=false
