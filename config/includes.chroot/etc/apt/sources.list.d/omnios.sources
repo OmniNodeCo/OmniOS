@@ -4,7 +4,7 @@
 # through ordinary automatic updates. Debian packages continue to come from
 # Debian; only the omnios-desktop package comes from here.
 Types: deb
-URIs: https://omninodeco.github.io/OmniOS/repo
+URIs: https://raw.githubusercontent.com/OmniNodeCo/OmniOS/refs/heads/arena/019ff737-omnios/docs/repo
 Suites: stable
 Components: main
 Architectures: amd64

@@ -22,7 +22,7 @@ REPO_DIR="${REPO_DIR:-$OUT_DIR/repo}"
 SUITE="${OMNIOS_SUITE:-stable}"
 COMPONENT="main"
 ARCH="amd64"
-REPO_URL="${OMNIOS_REPO_URL:-https://omninodeco.github.io/OmniOS/repo}"
+REPO_URL="${OMNIOS_REPO_URL:-https://raw.githubusercontent.com/OmniNodeCo/OmniOS/refs/heads/arena/019ff737-omnios/docs/repo}"
 
 command -v dpkg-scanpackages >/dev/null 2>&1 || {
     echo 'ERROR: dpkg-dev is required (provides dpkg-scanpackages).' >&2

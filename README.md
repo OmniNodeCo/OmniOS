@@ -292,9 +292,19 @@ The private key is never written to a log, and the artifact is encrypted, so a l
 
 ### Publishing the repository
 
-**Build OmniOS APT repository** builds the package, verifies with a real `apt-get update` that APT resolves the expected version, and deploys to GitHub Pages. It runs automatically whenever `version.txt`, `config/includes.chroot/`, or the packaging changes, and can also be run by hand.
+**Build OmniOS APT repository** builds the package, verifies with a real `apt-get update` that APT resolves the expected version, and then commits the result to `docs/repo` on this branch. It runs automatically whenever `version.txt`, `config/includes.chroot/`, or the packaging changes, and can also be run by hand.
 
-Enable **Settings → Pages → Source: GitHub Actions** once. Until the signing secrets exist, the repository is still built and attached as an artifact, but publishing is skipped and the run warns that installed systems cannot use an unsigned repository.
+The archive is served straight from the git repository, so there is no hosting to set up:
+
+```
+https://raw.githubusercontent.com/OmniNodeCo/OmniOS/refs/heads/arena/019ff737-omnios/docs/repo
+```
+
+That is the URL in `omnios.sources`, and it works as soon as the publish commit lands. The `refs/heads/` form is required because the branch name contains slashes. A published tree is about 1 MB, and each release replaces it rather than adding to it, so the repository does not grow without bound.
+
+Until the signing secrets exist, the repository is still built and uploaded as an artifact, but the publish step is skipped and the run warns that APT rejects unsigned archives.
+
+If you would rather host the archive elsewhere, set an `OMNIOS_REPO_URL` repository variable and update `URIs:` in `omnios.sources` to match.
 
 ### Shipping a change
 

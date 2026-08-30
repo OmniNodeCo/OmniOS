@@ -15,7 +15,8 @@ OmniOS Desktop 2026.1.1 is a maintenance release. It corrects the operating-syst
 
 - Added the `omnios-desktop` package and a signed OmniOS APT repository, so OmniOS's own identity, branding and system integration changes reach installed systems through automatic updates instead of only through a new ISO.
 - Added a signing-key workflow that generates the archive key, encrypts the private half with a transport passphrase before uploading it, and stores the release secrets automatically where permissions allow.
-- Added an APT repository workflow that rebuilds and publishes the repository to GitHub Pages whenever the packaged files change, verifying with a real `apt-get update` that APT resolves the expected version.
+- Added an APT repository workflow that rebuilds the repository whenever the packaged files change, verifying with a real `apt-get update` that APT resolves the expected version.
+- Published the APT repository from `docs/repo` in the git repository and served it over `raw.githubusercontent.com`, so updates need no GitHub Pages setup and the archive URL works as soon as the publish commit lands.
 - Added `origin=OmniOS` to the unattended-upgrades allowlist, and carried the OmniOS repository and signing key onto installed systems during Calamares installation.
 - Installed `omnios-desktop` into the image during the ISO build, so `dpkg` owns the OmniOS files and APT can upgrade them, and moved the identity setup into the package so an installed system and a freshly built ISO are configured the same way.
 - Kept `omnios-desktop` off the Debian installer's package-removal list, which would otherwise have uninstalled it during installation and taken the OmniOS identity and update channel with it.

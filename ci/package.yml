@@ -23,9 +23,9 @@ on:
       - scripts/build-apt-repo.sh
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  # The built repository is committed back into docs/repo and served from
+  # there, so this workflow writes to the repository rather than to Pages.
+  contents: write
 
 concurrency:
   group: omnios-apt-repo
@@ -65,7 +65,7 @@ jobs:
         env:
           OMNIOS_GPG_KEY: ${{ secrets.OMNIOS_GPG_KEY_ID }}
           OMNIOS_GPG_PRIVATE_KEY: ${{ secrets.OMNIOS_GPG_PRIVATE_KEY }}
-          OMNIOS_REPO_URL: ${{ vars.OMNIOS_REPO_URL || format('https://{0}.github.io/{1}/repo', github.repository_owner, github.event.repository.name) }}
+          OMNIOS_REPO_URL: ${{ vars.OMNIOS_REPO_URL || format('https://raw.githubusercontent.com/{0}/refs/heads/{1}/docs/repo', github.repository, github.ref_name) }}
         run: |
           if [[ -n "$OMNIOS_GPG_PRIVATE_KEY" && -n "$OMNIOS_GPG_KEY" ]]; then
             export GNUPGHOME="$RUNNER_TEMP/gnupg"
@@ -119,38 +119,55 @@ jobs:
           retention-days: 90
           if-no-files-found: error
 
-      - name: Package the repository for Pages
+      - name: Commit the repository into the git repository
         if: inputs.publish && steps.repo.outputs.signed == 'true'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: out/repo
-
-  publish:
-    needs: build
-    if: inputs.publish && needs.build.outputs.signed == 'true'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deploy
-        uses: actions/deploy-pages@v4
-
-      - name: Summarize
         env:
-          PAGE_URL: ${{ steps.deploy.outputs.page_url }}
-          VERSION: ${{ needs.build.outputs.version }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || secrets.GH_TOKEN || secrets.PAT_TOKEN || github.token }}
+          VERSION: ${{ steps.vars.outputs.version }}
         run: |
+          # The repository is served straight out of this git repository over
+          # raw.githubusercontent.com, so no GitHub Pages setup is needed and
+          # installed systems fetch from a URL that exists as soon as this
+          # commit lands.
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          # Replace the published tree wholesale; stale indexes must not linger.
+          rm -rf docs/repo
+          mkdir -p docs
+          cp -a out/repo docs/repo
+
+          # Stop Pages/Jekyll from mangling the archive if it is ever enabled.
+          touch docs/.nojekyll
+
+          # Stage first: a brand new docs/repo is untracked, and untracked
+          # files are invisible to git diff, so checking before staging would
+          # silently skip the very first publish.
+          git add -A docs/repo docs/.nojekyll
+
+          if git diff --cached --quiet; then
+            echo 'Published repository is already up to date.'
+            exit 0
+          fi
+
+          git commit -m "repo: publish OmniOS $VERSION APT repository [skip ci]"
+
+          # Retry once: another push can land between the checkout and here.
+          if ! git push origin "HEAD:$GITHUB_REF_NAME"; then
+            git pull --rebase origin "$GITHUB_REF_NAME"
+            git push origin "HEAD:$GITHUB_REF_NAME"
+          fi
+
           {
             echo "## OmniOS $VERSION published"
             echo
-            echo "Repository: ${PAGE_URL}repo"
+            echo 'Installed systems fetch from:'
             echo
-            echo 'Installed systems will pick this up on their next unattended-upgrades'
-            echo 'run. To check immediately on a test machine:'
+            echo '```'
+            echo "https://raw.githubusercontent.com/$GITHUB_REPOSITORY/refs/heads/$GITHUB_REF_NAME/docs/repo"
+            echo '```'
+            echo
+            echo 'They pick it up on the next unattended-upgrades run. To check now:'
             echo
             echo '```bash'
             echo 'sudo apt update && apt policy omnios-desktop'
