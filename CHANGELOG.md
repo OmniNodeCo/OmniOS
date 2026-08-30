@@ -19,6 +19,7 @@ OmniOS Desktop 2026.1.1 is a maintenance release. It corrects the operating-syst
 - Published the APT repository from `docs/repo` in the git repository and served it over `raw.githubusercontent.com`, so updates need no GitHub Pages setup and the archive URL works as soon as the publish commit lands.
 - Added `origin=OmniOS` to the unattended-upgrades allowlist, and carried the OmniOS repository and signing key onto installed systems during Calamares installation.
 - Installed `omnios-desktop` into the image during the ISO build, so `dpkg` owns the OmniOS files and APT can upgrade them, and moved the identity setup into the package so an installed system and a freshly built ISO are configured the same way.
+- Made the `omnios-desktop` maintainer scripts non-fatal, so a branding step that cannot complete warns instead of leaving the package half-configured and failing every package that depends on it, such as `desktop-base` and `task-kde-desktop`.
 - Kept `omnios-desktop` off the Debian installer's package-removal list, which would otherwise have uninstalled it during installation and taken the OmniOS identity and update channel with it.
 - Added APT download retries and longer timeouts so a single dropped CDN connection no longer fails a build that fetches over two thousand packages.
 - Added `scripts/build-vars.sh` and `scripts/verify-iso.sh`, so the ISO name, checksum filename, and release tag are derived from `version.txt` by the repository rather than repeated inside the CI workflow.

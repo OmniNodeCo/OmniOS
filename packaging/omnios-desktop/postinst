@@ -4,7 +4,12 @@
 # This mirrors config/hooks/normal/0500-omnios-config.hook.chroot, which does
 # the same work when the ISO is built. Keeping both in step means an installed
 # system and a freshly built ISO end up identical.
-set -Eeuo pipefail
+# Deliberately not "set -e". A maintainer script that exits non-zero leaves the
+# package half-configured, and dpkg then fails every package that depends on it
+# -- which is how a cosmetic branding step can take down task-kde-desktop and
+# desktop-base. Nothing here is important enough to break an installation, so
+# each step is allowed to fail and is reported instead.
+set -u
 
 case "${1:-}" in
     configure) ;;
@@ -12,34 +17,54 @@ case "${1:-}" in
     *) exit 0 ;;
 esac
 
+warn() { echo "omnios-desktop: $*" >&2; }
+
 # Preserve the OmniOS identity across future base-files upgrades. Debian's
 # original os-release stays available at /usr/lib/os-release.debian.
 if ! dpkg-divert --list /usr/lib/os-release | grep -q /usr/lib/os-release; then
     dpkg-divert --package omnios-desktop --add --rename \
-        --divert /usr/lib/os-release.debian /usr/lib/os-release
+        --divert /usr/lib/os-release.debian /usr/lib/os-release \
+        || warn 'could not divert /usr/lib/os-release'
 fi
-install -m 0644 /usr/share/omnios/identity/os-release /usr/lib/os-release
-install -m 0644 /usr/share/omnios/identity/omnios-release /etc/omnios-release
-install -m 0644 /usr/share/omnios/identity/issue /etc/issue
-install -m 0644 /usr/share/omnios/identity/motd /etc/motd
-install -m 0644 /usr/share/omnios/identity/lsb-release /etc/lsb-release
-ln -sfn ../usr/lib/os-release /etc/os-release
+
+# The diversion renames the existing file away, so recreate it from ours.
+install -m 0644 /usr/share/omnios/identity/os-release /usr/lib/os-release \
+    || warn 'could not install os-release'
+ln -sfn ../usr/lib/os-release /etc/os-release || warn 'could not link /etc/os-release'
+
+for pair in \
+    'omnios-release:/etc/omnios-release' \
+    'issue:/etc/issue' \
+    'motd:/etc/motd' \
+    'lsb-release:/etc/lsb-release'
+do
+    src="/usr/share/omnios/identity/${pair%%:*}"
+    dst="${pair#*:}"
+    install -m 0644 "$src" "$dst" || warn "could not install $dst"
+done
 
 # KDE's "About this System" page reads /etc/os-release, which base-files also
 # owns. State the OmniOS name, version and logo explicitly.
-install -d /etc/xdg
+install -d /etc/xdg || true
 install -m 0644 /usr/share/omnios/identity/kcm-about-distrorc \
-    /etc/xdg/kcm-about-distrorc
+    /etc/xdg/kcm-about-distrorc || warn 'could not install kcm-about-distrorc'
 
 # Refresh the icon cache so the OmniOS logo resolves by name everywhere.
 if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache --force --quiet /usr/share/icons/hicolor || true
 fi
 
-# Enable the units this package ships. Without this they would be present but
-# inactive, so the first-boot setup and the scheduled antivirus scan would
-# never run on a system that gained them through an update.
-if [[ -d /run/systemd/system ]] || [[ ! -d /run/systemd ]]; then
+install -d /etc/default/grub.d || true
+cat > /etc/default/grub.d/10-omnios.cfg <<'GRUB' || warn 'could not write GRUB defaults'
+GRUB_DISTRIBUTOR="OmniOS"
+GRUB_TIMEOUT_STYLE=menu
+GRUB_TIMEOUT=5
+GRUB_DISABLE_RECOVERY=false
+GRUB
+
+# Enable the units this package ships, so a system that gained them through an
+# update runs first-boot setup and the scheduled scan like a fresh install.
+if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
     for unit in \
         omnios-firstboot.service \
@@ -50,20 +75,14 @@ if [[ -d /run/systemd/system ]] || [[ ! -d /run/systemd ]]; then
     done
 fi
 
-install -d /etc/default/grub.d
-cat > /etc/default/grub.d/10-omnios.cfg <<'GRUB'
-GRUB_DISTRIBUTOR="OmniOS"
-GRUB_TIMEOUT_STYLE=menu
-GRUB_TIMEOUT=5
-GRUB_DISABLE_RECOVERY=false
-GRUB
-
-# Only refresh the bootloader on a real installed system, never in a chroot or
-# on live media, where update-grub would target the build host.
-if [[ -d /boot/grub ]] && [[ ! -d /run/live ]] && command -v update-grub >/dev/null 2>&1; then
-    update-grub || true
+# Refresh the bootloader only on a real installed system. In a build chroot or
+# on live media this would target the wrong disk, so it is skipped there.
+if [[ -d /boot/grub ]] && [[ ! -d /run/live ]] \
+    && command -v update-grub >/dev/null 2>&1; then
+    update-grub >/dev/null 2>&1 || true
 fi
 
 #DEBHELPER#
 
+# Always succeed. Branding must never be the reason an installation fails.
 exit 0
