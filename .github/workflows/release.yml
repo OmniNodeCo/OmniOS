@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version number to release, for example 2026.1 (published as tag v2026.1). Leave blank to use the latest successful build.'
+        description: 'Version number to release, for example 2026.1.1 (published as tag v2026.1.1). Leave blank to use the latest successful build.'
         required: false
         default: ""
         type: string
@@ -552,6 +552,37 @@ jobs:
           echo 'Attached assets:'
           gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
             --json assets --jq '.assets[] | "  \(.name)  \(.size) bytes"'
+
+      - name: Publish the OmniOS APT repository
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          RELEASE_TAG: ${{ steps.build.outputs.tag }}
+          OMNIOS_GPG_KEY: ${{ secrets.OMNIOS_GPG_KEY_ID }}
+          OMNIOS_GPG_PRIVATE_KEY: ${{ secrets.OMNIOS_GPG_PRIVATE_KEY }}
+        run: |
+          # Installed systems upgrade from this repository, so publishing it is
+          # what makes an OmniOS change reach existing users instead of only
+          # people who reinstall from the new ISO.
+          if [[ -z "$OMNIOS_GPG_PRIVATE_KEY" || -z "$OMNIOS_GPG_KEY" ]]; then
+            {
+              echo '::warning title=APT repository not published::'\
+          'OMNIOS_GPG_PRIVATE_KEY and OMNIOS_GPG_KEY_ID are not set.'
+              echo 'The ISO was released, but existing installations will not receive this'
+              echo 'update because an unsigned APT repository is rejected by APT.'
+              echo 'See README.md, "Updating installed systems", to create the signing key.'
+            } >&2
+            exit 0
+          fi
+
+          printf '%s' "$OMNIOS_GPG_PRIVATE_KEY" | gpg --batch --import
+          scripts/build-package.sh
+          scripts/build-apt-repo.sh
+
+          # The repository is small, so attaching it to the release keeps it
+          # versioned alongside the ISO it belongs to.
+          tar -czf omnios-apt-repo.tar.gz -C out repo
+          gh release upload "$RELEASE_TAG" omnios-apt-repo.tar.gz \
+            --repo "$GITHUB_REPOSITORY" --clobber
 
       - name: Summarize release
         env:
