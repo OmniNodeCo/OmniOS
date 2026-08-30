@@ -21,7 +21,7 @@ command -v dpkg-deb >/dev/null 2>&1 || {
 
 # Everything OmniOS owns, and nothing Debian owns. Debian's own packages are
 # upgraded by APT, so shipping copies of their files here would fight dpkg.
-readonly PAYLOAD=(
+PAYLOAD=(
     usr/libexec/omnios-antivirus-scan
     usr/libexec/omnios-apt-snapshot
     usr/libexec/omnios-enable-flathub
@@ -39,7 +39,16 @@ readonly PAYLOAD=(
     etc/apt/apt.conf.d/51omnios-unattended-upgrades
     etc/apt/apt.conf.d/80omnios-snapshots
     etc/sysctl.d/99-omnios-security.conf
+    # The repository definition ships in the package that the repository
+    # upgrades, so the update channel can be corrected by an update.
+    etc/apt/sources.list.d/omnios.sources
 )
+
+# The public signing key, when it has been committed. Shipping it in the
+# package keeps the keyring and the sources file in step.
+if [[ -f "$ROOT/config/includes.chroot/usr/share/keyrings/omnios-archive-keyring.asc" ]]; then
+    PAYLOAD+=(usr/share/keyrings/omnios-archive-keyring.asc)
+fi
 
 src="$ROOT/config/includes.chroot"
 build="$STAGE/$PKG"

@@ -55,6 +55,25 @@ prepare_workspace() {
     ln -s "$relative_cache" "$WORK_DIR/cache"
 }
 
+prepare_omnios_package() {
+    # Install the OmniOS files as a real package rather than only copying them
+    # into the filesystem. dpkg then owns them, so APT can upgrade them from the
+    # OmniOS repository later. Without this an installed system would report
+    # omnios-desktop as "not installed" and never receive OmniOS updates.
+    OUT_DIR="$BUILD_ROOT/pkg" "$ROOT/scripts/build-package.sh" >/dev/null
+
+    local deb="$BUILD_ROOT/pkg/omnios-desktop_${VERSION}_all.deb"
+    [[ -f "$deb" ]] || {
+        echo "ERROR: the omnios-desktop package was not built: $deb" >&2
+        exit 1
+    }
+
+    # live-build installs any .deb found here into the chroot.
+    mkdir -p "$WORK_DIR/config/packages.chroot"
+    cp "$deb" "$WORK_DIR/config/packages.chroot/"
+    printf 'Staged %s for installation into the image\n' "$(basename "$deb")"
+}
+
 prepare_bootloader_branding() {
     local template_root="${LIVE_BUILD_SHARE:-/usr/share/live/build}/bootloaders"
     mkdir -p "$WORK_DIR/config/bootloaders"
@@ -93,6 +112,7 @@ prepare_bootloader_branding() {
 configure() {
     require_build_tools
     prepare_workspace
+    prepare_omnios_package
     prepare_bootloader_branding
     (
         cd "$WORK_DIR"

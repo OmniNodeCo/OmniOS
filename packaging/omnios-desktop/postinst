@@ -36,6 +36,20 @@ if command -v gtk-update-icon-cache >/dev/null 2>&1; then
     gtk-update-icon-cache --force --quiet /usr/share/icons/hicolor || true
 fi
 
+# Enable the units this package ships. Without this they would be present but
+# inactive, so the first-boot setup and the scheduled antivirus scan would
+# never run on a system that gained them through an update.
+if [[ -d /run/systemd/system ]] || [[ ! -d /run/systemd ]]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+    for unit in \
+        omnios-firstboot.service \
+        omnios-flathub.service \
+        omnios-antivirus-scan.timer
+    do
+        systemctl enable "$unit" >/dev/null 2>&1 || true
+    done
+fi
+
 install -d /etc/default/grub.d
 cat > /etc/default/grub.d/10-omnios.cfg <<'GRUB'
 GRUB_DISTRIBUTOR="OmniOS"

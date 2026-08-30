@@ -1,0 +1,22 @@
+#!/bin/bash
+# Keep omnios-desktop installed on the target system.
+#
+# live-build records packages that came from config/packages.chroot rather than
+# from an archive in live/filesystem.packages-remove, and the Debian installer
+# removes everything listed there once the system is installed (Debian
+# bug #1062641). omnios-desktop is installed that way, so without this it would
+# be present on the live session and then silently uninstalled by the
+# installation, taking the OmniOS identity and the update channel with it.
+#
+# The package is genuinely available from the OmniOS repository that the
+# installed system is configured to use, so keeping it is correct.
+set -Eeuo pipefail
+
+removed=binary/live/filesystem.packages-remove
+[[ -f "$removed" ]] || exit 0
+
+if grep -qx 'omnios-desktop' "$removed"; then
+    grep -vx 'omnios-desktop' "$removed" > "$removed.keep"
+    mv "$removed.keep" "$removed"
+    echo 'Kept omnios-desktop installed on the target system.'
+fi

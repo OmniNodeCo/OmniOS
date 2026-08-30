@@ -255,7 +255,12 @@ scripts/build-package.sh    # -> out/omnios-desktop_<version>_all.deb
 scripts/build-apt-repo.sh   # -> out/repo, a signed APT repository
 ```
 
-Installed systems carry `/etc/apt/sources.list.d/omnios.sources`, and `51omnios-unattended-upgrades` allows the `origin=OmniOS` archive, so a published `omnios-desktop` upgrade installs itself the same way a Debian security update does. Without this, an OmniOS change would only reach people who reinstall from a newer ISO.
+The ISO build installs that package into the image through `config/packages.chroot`, so `dpkg` owns those files and APT can upgrade them later. The package itself carries `/etc/apt/sources.list.d/omnios.sources`, and `51omnios-unattended-upgrades` allows the `origin=OmniOS` archive, so a published `omnios-desktop` upgrade installs itself the same way a Debian security update does. Without this, an OmniOS change would only reach people who reinstall from a newer ISO.
+
+Two details make that reliable, and both are easy to get wrong:
+
+- the identity work lives in the package's `postinst`, not in the live-build hook, so it is applied identically whether a system was installed from the ISO or upgraded into. The hook only asserts that the package is present and fails the build if it is not;
+- the Debian installer removes packages that were installed from a local `.deb` rather than an archive ([bug #1062641](https://bugs.debian.org/1062641)), which would silently uninstall `omnios-desktop` during installation. `9000-keep-omnios-desktop.hook.binary` takes it back off that removal list.
 
 ### One-time signing key setup
 

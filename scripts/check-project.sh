@@ -27,7 +27,7 @@ for path in "${required[@]}"; do
     [[ -s "$ROOT/$path" ]] || { echo "ERROR: required file missing or empty: $path" >&2; exit 1; }
 done
 
-bash -n "$ROOT"/scripts/*.sh "$ROOT"/config/hooks/normal/*.hook.chroot \
+bash -n "$ROOT"/scripts/*.sh "$ROOT"/config/hooks/normal/*.hook.* \
     "$ROOT"/config/includes.chroot/usr/libexec/omnios-*
 
 python3 - "$ROOT" <<'PY'
@@ -79,11 +79,14 @@ for path in rendered:
 # Everything the omnios-desktop package claims to ship must exist in the ISO
 # tree, otherwise installed systems and the ISO would drift apart.
 package_script = root.joinpath('scripts/build-package.sh').read_text(encoding='utf-8')
-payload = re.search(r'readonly PAYLOAD=\((.*?)\n\)', package_script, re.S)
+payload = re.search(r'^PAYLOAD=\((.*?)^\)', package_script, re.S | re.M)
 if not payload:
     raise SystemExit('could not read PAYLOAD from scripts/build-package.sh')
 includes = root.joinpath('config/includes.chroot')
-for entry in payload.group(1).split():
+for line in payload.group(1).splitlines():
+    entry = line.split('#', 1)[0].strip()
+    if not entry:
+        continue
     if not includes.joinpath(entry).exists():
         raise SystemExit(f'omnios-desktop packages a missing path: {entry}')
 
@@ -113,7 +116,7 @@ if command -v desktop-file-validate >/dev/null 2>&1; then
     desktop-file-validate "$ROOT/config/includes.chroot/usr/share/applications/install-omnios.desktop"
 fi
 if command -v shellcheck >/dev/null 2>&1; then
-    shellcheck "$ROOT"/scripts/*.sh "$ROOT"/config/hooks/normal/*.hook.chroot \
+    shellcheck "$ROOT"/scripts/*.sh "$ROOT"/config/hooks/normal/*.hook.* \
         "$ROOT"/config/includes.chroot/usr/libexec/omnios-*
 fi
 if find "$ROOT" -path "$ROOT/.git" -prune -o -type f \( -name '*.key' -o -name '*.key.pem' \) -print | grep -q .; then
