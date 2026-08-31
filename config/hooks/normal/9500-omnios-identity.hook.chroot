@@ -1,0 +1,42 @@
+#!/bin/bash
+# Apply the OmniOS identity at the very end of the chroot stage.
+#
+# The omnios-desktop package deliberately defers this during an image build.
+# Debian packages configured later in the same run read /usr/lib/os-release to
+# decide what to do, and desktop-base fails outright when it finds an ID it does
+# not recognise, taking task-desktop and task-kde-desktop down with it. By the
+# time this hook runs every Debian package has been configured, so replacing the
+# identity is safe.
+#
+# The result is identical to what the package's postinst does on an installed
+# system: the same diversion, owned by the same package, so a later
+# omnios-desktop upgrade takes over cleanly.
+set -Eeuo pipefail
+
+if ! dpkg-query -W -f='${Status}' omnios-desktop 2>/dev/null \
+    | grep -q 'install ok installed'; then
+    echo 'ERROR: omnios-desktop is not installed in the image.' >&2
+    echo 'The OmniOS identity and the update channel come from that package.' >&2
+    exit 1
+fi
+
+if ! dpkg-divert --list /usr/lib/os-release | grep -q /usr/lib/os-release; then
+    dpkg-divert --package omnios-desktop --add --rename \
+        --divert /usr/lib/os-release.debian /usr/lib/os-release
+fi
+install -m 0644 /usr/share/omnios/identity/os-release /usr/lib/os-release
+ln -sfn ../usr/lib/os-release /etc/os-release
+
+install -m 0644 /usr/share/omnios/identity/omnios-release /etc/omnios-release
+install -m 0644 /usr/share/omnios/identity/issue /etc/issue
+install -m 0644 /usr/share/omnios/identity/motd /etc/motd
+install -m 0644 /usr/share/omnios/identity/lsb-release /etc/lsb-release
+
+# Confirm the image really did end up branded as OmniOS, so a silent failure
+# cannot ship an ISO that still calls itself Debian.
+if ! grep -q '^ID=omnios$' /usr/lib/os-release; then
+    echo 'ERROR: /usr/lib/os-release is not the OmniOS identity.' >&2
+    exit 1
+fi
+
+echo "Applied the OmniOS identity: $(sed -n 's/^PRETTY_NAME="\(.*\)"$/\1/p' /usr/lib/os-release)"

@@ -21,27 +21,42 @@ warn() { echo "omnios-desktop: $*" >&2; }
 
 # Preserve the OmniOS identity across future base-files upgrades. Debian's
 # original os-release stays available at /usr/lib/os-release.debian.
-if ! dpkg-divert --list /usr/lib/os-release | grep -q /usr/lib/os-release; then
-    dpkg-divert --package omnios-desktop --add --rename \
-        --divert /usr/lib/os-release.debian /usr/lib/os-release \
-        || warn 'could not divert /usr/lib/os-release'
+#
+# This is deliberately skipped while an image is being built. Other packages
+# configured later in the same run read /usr/lib/os-release to choose their
+# theme, and desktop-base in particular fails outright when it finds an ID it
+# does not recognise, which then fails task-desktop and task-kde-desktop with
+# it. During a build the identity is applied at the very end instead, by
+# config/hooks/normal/9500-omnios-identity.hook.chroot.
+# live-build installs /usr/sbin/policy-rc.d for the whole chroot stage and
+# removes it afterwards, so its presence is a reliable marker that packages are
+# still being installed into an image being built.
+if [ -e /usr/sbin/policy-rc.d ] || [ -n "${OMNIOS_DEFER_IDENTITY:-}" ]; then
+    echo 'omnios-desktop: image build detected, deferring identity setup' >&2
+else
+    if ! dpkg-divert --list /usr/lib/os-release | grep -q /usr/lib/os-release; then
+        dpkg-divert --package omnios-desktop --add --rename \
+            --divert /usr/lib/os-release.debian /usr/lib/os-release \
+            || warn 'could not divert /usr/lib/os-release'
+    fi
+
+    # The diversion renames the existing file away, so recreate it from ours.
+    install -m 0644 /usr/share/omnios/identity/os-release /usr/lib/os-release \
+        || warn 'could not install os-release'
+    ln -sfn ../usr/lib/os-release /etc/os-release \
+        || warn 'could not link /etc/os-release'
+
+    for pair in \
+        'omnios-release:/etc/omnios-release' \
+        'issue:/etc/issue' \
+        'motd:/etc/motd' \
+        'lsb-release:/etc/lsb-release'
+    do
+        src="/usr/share/omnios/identity/${pair%%:*}"
+        dst="${pair#*:}"
+        install -m 0644 "$src" "$dst" || warn "could not install $dst"
+    done
 fi
-
-# The diversion renames the existing file away, so recreate it from ours.
-install -m 0644 /usr/share/omnios/identity/os-release /usr/lib/os-release \
-    || warn 'could not install os-release'
-ln -sfn ../usr/lib/os-release /etc/os-release || warn 'could not link /etc/os-release'
-
-for pair in \
-    'omnios-release:/etc/omnios-release' \
-    'issue:/etc/issue' \
-    'motd:/etc/motd' \
-    'lsb-release:/etc/lsb-release'
-do
-    src="/usr/share/omnios/identity/${pair%%:*}"
-    dst="${pair#*:}"
-    install -m 0644 "$src" "$dst" || warn "could not install $dst"
-done
 
 # KDE's "About this System" page reads /etc/os-release, which base-files also
 # owns. State the OmniOS name, version and logo explicitly.
