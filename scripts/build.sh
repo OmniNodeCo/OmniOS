@@ -143,7 +143,27 @@ build_image() {
     ) 2>&1 | tee "$log_file"
     local build_status=${PIPESTATUS[0]}
     set -e
-    (( build_status == 0 )) || exit "$build_status"
+
+    if (( build_status != 0 )); then
+        # live-build prints only the names of packages that failed, not why.
+        # The reason is the "dpkg: error processing" line further up, and in a
+        # 2000-package build that scrolls far out of view. Surface it here so a
+        # failure is diagnosable from the CI output alone.
+        echo >&2
+        echo '================ package configuration failures ================' >&2
+        if grep -nE 'dpkg: error|update-alternatives: error|error processing package' \
+            "$log_file" >&2; then
+            echo >&2
+            echo '--- context around the first failure ---' >&2
+            grep -nE -B 25 'dpkg: error processing package' "$log_file" \
+                | head -60 >&2 || true
+        else
+            echo '(no dpkg error lines found; showing the last 60 lines)' >&2
+            tail -n 60 "$log_file" >&2
+        fi
+        echo '================================================================' >&2
+        exit "$build_status"
+    fi
 
     local source_iso
     source_iso="$(find "$WORK_DIR" -maxdepth 1 -type f \( -name '*.hybrid.iso' -o -name '*.iso' \) -print | sort | tail -n 1)"
