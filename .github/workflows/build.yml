@@ -94,6 +94,18 @@ jobs:
         if: inputs.full_build
         run: scripts/build-container.sh
 
+      - name: Upload the live-build log
+        # Always, so a failed build is diagnosable. live-build reports only
+        # which packages failed, never why, and the reason is buried thousands
+        # of lines up in this log.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-build-log
+          path: build/live-build.log
+          retention-days: 14
+          if-no-files-found: ignore
+
       - name: Verify ISO checksum
         if: inputs.full_build
         run: scripts/verify-iso.sh
