@@ -60,7 +60,21 @@ fi
 
 # KDE's "About this System" page reads /etc/os-release, which base-files also
 # owns. State the OmniOS name, version and logo explicitly.
+#
+# /etc/xdg/kcm-about-distrorc is a conffile belonging to desktop-base. Writing
+# it directly makes dpkg see a file "created by you or by a script" that is
+# also shipped by a package, so it stops and asks what to do. A build has no
+# stdin, so that prompt fails desktop-base and everything depending on it.
+# Divert it instead, which is the supported way for one package to replace
+# another package's conffile.
 install -d /etc/xdg || true
+if ! dpkg-divert --list /etc/xdg/kcm-about-distrorc \
+    | grep -q /etc/xdg/kcm-about-distrorc; then
+    dpkg-divert --package omnios-desktop --add --rename --quiet \
+        --divert /etc/xdg/kcm-about-distrorc.debian \
+        /etc/xdg/kcm-about-distrorc \
+        || warn 'could not divert kcm-about-distrorc'
+fi
 install -m 0644 /usr/share/omnios/identity/kcm-about-distrorc \
     /etc/xdg/kcm-about-distrorc || warn 'could not install kcm-about-distrorc'
 

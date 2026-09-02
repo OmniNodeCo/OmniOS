@@ -7,6 +7,12 @@ set -Eeuo pipefail
 case "${1:-}" in
     remove | deconfigure)
         rm -f /etc/xdg/kcm-about-distrorc
+        if dpkg-divert --list /etc/xdg/kcm-about-distrorc \
+            | grep -q /etc/xdg/kcm-about-distrorc; then
+            dpkg-divert --package omnios-desktop --remove --rename --quiet \
+                --divert /etc/xdg/kcm-about-distrorc.debian \
+                /etc/xdg/kcm-about-distrorc
+        fi
         rm -f /etc/default/grub.d/10-omnios.cfg
         rm -f /usr/lib/os-release
         if dpkg-divert --list /usr/lib/os-release | grep -q /usr/lib/os-release; then
