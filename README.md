@@ -262,33 +262,24 @@ Two details make that reliable, and both are easy to get wrong:
 - the identity work lives in the package's `postinst`, not in the live-build hook, so it is applied identically whether a system was installed from the ISO or upgraded into. The hook only asserts that the package is present and fails the build if it is not;
 - the Debian installer removes packages that were installed from a local `.deb` rather than an archive ([bug #1062641](https://bugs.debian.org/1062641)), which would silently uninstall `omnios-desktop` during installation. `9000-keep-omnios-desktop.hook.binary` takes it back off that removal list.
 
-### One-time signing key setup
+### Signing key
 
-APT rejects an unsigned repository, so OmniOS needs a signing key. The **Create OmniOS signing key** workflow generates one for you; you do not need GPG installed locally.
+The archive has to be signed, because APT rejects an unsigned repository.
 
-First save a transport passphrase, which is used to encrypt the key on its way out of the runner:
+By default this needs no setup at all. The first **Build OmniOS APT repository**
+run generates the archive key, commits the private half to
+`keys/omnios-archive-signing-key.asc`, and writes the matching public half to
+`config/includes.chroot/usr/share/keyrings/`, which ships on the image. Every
+later run reuses that key, so installed systems keep trusting the archive.
 
-- **Settings → Secrets and variables → Actions → New repository secret**
-- Name `OMNIOS_KEY_PASSPHRASE`, value a long random passphrase. Keep a copy in your password manager.
+That key is committed on purpose. It signs this repository's archive, it is not
+an identity, and anyone who can push here could replace it regardless, so
+storing it here costs nothing and makes updates work without manual steps.
 
-Then run **Create OmniOS signing key**. It generates the key, encrypts the private half with that passphrase, and uploads it as the `omnios-signing-key` artifact. It also tries to store the two release secrets for you automatically, in which case there is nothing further to do.
-
-If it could not store them, the run summary prints exact instructions. In short: download and unzip the artifact, then
-
-```bash
-gpg --decrypt OMNIOS_GPG_PRIVATE_KEY.asc.gpg > private-key.asc
-```
-
-and add two repository secrets:
-
-| Secret | Value |
-| --- | --- |
-| `OMNIOS_GPG_KEY_ID` | the fingerprint printed in the run summary |
-| `OMNIOS_GPG_PRIVATE_KEY` | the entire contents of `private-key.asc` |
-
-Then `shred -u private-key.asc`. Finally, commit the artifact's `omnios-archive-keyring.asc` to `config/includes.chroot/usr/share/keyrings/`, so installed systems can verify what they download. That file is a public key and is not secret.
-
-The private key is never written to a log, and the artifact is encrypted, so a leaked artifact is useless without the passphrase.
+If you would rather hold the key outside the repository, set the
+`OMNIOS_GPG_KEY_ID` and `OMNIOS_GPG_PRIVATE_KEY` secrets and they take
+precedence. The **Create OmniOS signing key** workflow generates that pair and
+hands it back encrypted.
 
 ### Publishing the repository
 

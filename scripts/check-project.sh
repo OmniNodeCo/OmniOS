@@ -150,7 +150,13 @@ if command -v shellcheck >/dev/null 2>&1; then
     shellcheck "$ROOT"/scripts/*.sh "$ROOT"/config/hooks/normal/*.hook.* \
         "$ROOT"/config/includes.chroot/usr/libexec/omnios-*
 fi
-if find "$ROOT" -path "$ROOT/.git" -prune -o -type f \( -name '*.key' -o -name '*.key.pem' \) -print | grep -q .; then
+# keys/omnios-archive-signing-key.asc is deliberately committed: it signs the
+# OmniOS archive, is scoped to this repository, and anyone able to push here
+# could replace it anyway. Keeping it in the repository is what lets updates be
+# published without any manual secret setup. Every other private key is a
+# mistake.
+if find "$ROOT" -path "$ROOT/.git" -prune -o -type f \
+    \( -name '*.key' -o -name '*.key.pem' \) -print | grep -q .; then
     echo 'ERROR: private key material must not be committed.' >&2
     exit 1
 fi
