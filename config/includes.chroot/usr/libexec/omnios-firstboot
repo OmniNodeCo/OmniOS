@@ -3,6 +3,25 @@ set -Eeuo pipefail
 
 install -d -m 0755 /var/lib/omnios
 
+# Enable the OmniOS update channel, which ships disabled so that a not yet
+# published archive cannot fail the image build. Only enable it once the
+# archive really answers and the signing key is present, so a machine is never
+# left with an apt source that breaks every "apt update".
+omnios_sources=/etc/apt/sources.list.d/omnios.sources
+omnios_keyring=/usr/share/keyrings/omnios-archive-keyring.asc
+if [[ -f "$omnios_sources" ]] && grep -q '^Enabled: no$' "$omnios_sources"; then
+    url="$(awk '/^URIs:/ { print $2; exit }' "$omnios_sources")"
+    suite="$(awk '/^Suites:/ { print $2; exit }' "$omnios_sources")"
+    if [[ -s "$omnios_keyring" ]] \
+        && curl --fail --silent --show-error --location --max-time 20 \
+            --output /dev/null "$url/dists/$suite/Release" 2>/dev/null; then
+        sed -i 's/^Enabled: no$/Enabled: yes/' "$omnios_sources"
+        echo "omnios-firstboot: enabled the OmniOS update channel at $url"
+    else
+        echo "omnios-firstboot: OmniOS archive not reachable yet, leaving it disabled" >&2
+    fi
+fi
+
 # The installer launcher belongs only in the live session.
 rm -f /usr/share/applications/install-omnios.desktop \
     /etc/skel/Desktop/install-omnios.desktop

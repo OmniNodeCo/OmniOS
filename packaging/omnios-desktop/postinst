@@ -34,13 +34,17 @@ warn() { echo "omnios-desktop: $*" >&2; }
 if [ -e /usr/sbin/policy-rc.d ] || [ -n "${OMNIOS_DEFER_IDENTITY:-}" ]; then
     echo 'omnios-desktop: image build detected, deferring identity setup' >&2
 else
+    # --no-rename because os-release belongs to base-files, which is Essential.
+    # Renaming an Essential package's file leaves the system briefly without it
+    # and dpkg warns that this is dangerous, so copy it aside ourselves first.
     if ! dpkg-divert --list /usr/lib/os-release | grep -q /usr/lib/os-release; then
-        dpkg-divert --package omnios-desktop --add --rename \
+        [[ -e /usr/lib/os-release.debian ]] \
+            || cp -a /usr/lib/os-release /usr/lib/os-release.debian 2>/dev/null || true
+        dpkg-divert --package omnios-desktop --add --no-rename --quiet \
             --divert /usr/lib/os-release.debian /usr/lib/os-release \
             || warn 'could not divert /usr/lib/os-release'
     fi
 
-    # The diversion renames the existing file away, so recreate it from ours.
     install -m 0644 /usr/share/omnios/identity/os-release /usr/lib/os-release \
         || warn 'could not install os-release'
     ln -sfn ../usr/lib/os-release /etc/os-release \

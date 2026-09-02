@@ -20,8 +20,13 @@ if ! dpkg-query -W -f='${Status}' omnios-desktop 2>/dev/null \
     exit 1
 fi
 
+# --no-rename because os-release belongs to base-files, which is Essential.
+# dpkg warns that renaming an Essential package's file is dangerous, so keep a
+# copy of Debian's version ourselves instead.
 if ! dpkg-divert --list /usr/lib/os-release | grep -q /usr/lib/os-release; then
-    dpkg-divert --package omnios-desktop --add --rename \
+    [[ -e /usr/lib/os-release.debian ]] \
+        || cp -a /usr/lib/os-release /usr/lib/os-release.debian
+    dpkg-divert --package omnios-desktop --add --no-rename --quiet \
         --divert /usr/lib/os-release.debian /usr/lib/os-release
 fi
 install -m 0644 /usr/share/omnios/identity/os-release /usr/lib/os-release

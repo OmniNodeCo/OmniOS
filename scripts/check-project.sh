@@ -90,6 +90,37 @@ for line in payload.group(1).splitlines():
     if not includes.joinpath(entry).exists():
         raise SystemExit(f'omnios-desktop packages a missing path: {entry}')
 
+# The OmniOS apt source must ship disabled. live-build runs "apt update" inside
+# the chroot, so an archive that is not published yet answers 404 and fails the
+# whole image build. omnios-firstboot enables it once it is reachable.
+omnios_sources = root.joinpath(
+    'config/includes.chroot/etc/apt/sources.list.d/omnios.sources'
+).read_text(encoding='utf-8')
+if 'Enabled: no' not in omnios_sources:
+    raise SystemExit(
+        'omnios.sources must ship with "Enabled: no"; an unpublished archive '
+        'returns 404 and fails "apt update" during the image build'
+    )
+
+# Diverting a file owned by an Essential package with --rename leaves the
+# system without it for a moment, and dpkg warns that this is dangerous.
+for candidate in (
+    root.joinpath('packaging/omnios-desktop/postinst'),
+    root.joinpath('packaging/omnios-desktop/prerm'),
+    root.joinpath('config/hooks/normal/9500-omnios-identity.hook.chroot'),
+):
+    text = candidate.read_text(encoding='utf-8')
+    # Join continuation lines so a flag and its target are seen together.
+    joined = re.sub(r'\\\s*\n\s*', ' ', text)
+    for statement in joined.splitlines():
+        if 'dpkg-divert' not in statement or 'os-release' not in statement:
+            continue
+        if '--rename' in statement.replace('--no-rename', ''):
+            raise SystemExit(
+                f'{candidate.relative_to(root)}: os-release belongs to '
+                'base-files, which is Essential; divert it with --no-rename'
+            )
+
 # unattended-upgrades has to accept the OmniOS origin, or published updates
 # would never install automatically.
 uu = root.joinpath(

@@ -3,6 +3,13 @@
 # This is what lets an installed OmniOS system receive OmniOS's own changes
 # through ordinary automatic updates. Debian packages continue to come from
 # Debian; only the omnios-desktop package comes from here.
+#
+# Shipped disabled on purpose. The image build runs "apt update" inside the
+# chroot, and an OmniOS archive that has not been published yet answers 404,
+# which fails the whole build. The repository is only ever needed by an
+# installed system, so omnios-firstboot enables this on first boot, and only
+# once it has confirmed the archive is actually reachable.
+Enabled: no
 Types: deb
 URIs: https://raw.githubusercontent.com/OmniNodeCo/OmniOS/refs/heads/arena/019ff737-omnios/docs/repo
 Suites: stable

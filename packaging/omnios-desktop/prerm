@@ -14,10 +14,15 @@ case "${1:-}" in
                 /etc/xdg/kcm-about-distrorc
         fi
         rm -f /etc/default/grub.d/10-omnios.cfg
-        rm -f /usr/lib/os-release
+
+        # Restore Debian's os-release by hand: the diversion was added with
+        # --no-rename, so dpkg will not move the file back for us.
         if dpkg-divert --list /usr/lib/os-release | grep -q /usr/lib/os-release; then
-            dpkg-divert --package omnios-desktop --remove --rename \
+            dpkg-divert --package omnios-desktop --remove --no-rename --quiet \
                 --divert /usr/lib/os-release.debian /usr/lib/os-release
+        fi
+        if [ -e /usr/lib/os-release.debian ]; then
+            mv -f /usr/lib/os-release.debian /usr/lib/os-release
         fi
         ln -sfn ../usr/lib/os-release /etc/os-release
         ;;
