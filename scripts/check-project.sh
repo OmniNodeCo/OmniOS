@@ -8,6 +8,7 @@ required=(
     branding/boot-splash.svg
     scripts/read-version.sh
     scripts/build-vars.sh
+    scripts/bump-version.sh
     scripts/verify-iso.sh
     scripts/build-package.sh
     scripts/build-apt-repo.sh

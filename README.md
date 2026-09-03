@@ -163,6 +163,7 @@ config/hooks/normal/            post-package configuration and cleanup
 scripts/build.sh                direct Debian live-build wrapper
 scripts/build-container.sh      recommended Debian 13 container build
 scripts/build-vars.sh           version-derived names shared with CI
+scripts/bump-version.sh         increments the patch version for a release
 scripts/verify-iso.sh           checksum verification of the built ISO
 scripts/render-logo.py          regenerates the OmniOS logo icons
 scripts/check-project.sh        static validation
@@ -299,9 +300,23 @@ If you would rather host the archive elsewhere, set an `OMNIOS_REPO_URL` reposit
 
 ### Shipping a change
 
-1. edit the files under `config/includes.chroot/`;
-2. bump `version.txt` and add its `CHANGELOG.md` section;
-3. run **Build OmniOS ISO**, then **Release OmniOS ISO**.
+Edit the files under `config/includes.chroot/` and push. That is the whole
+procedure for reaching installed systems.
+
+The push triggers **Build OmniOS APT repository**, which increments the patch
+version in `version.txt`, rebuilds `omnios-desktop`, republishes `docs/repo`,
+and commits the result. Installed machines pick it up on their next
+unattended-upgrades run. The version bump matters: APT only offers an upgrade
+when the candidate version is higher than the installed one, so republishing
+under the same version would reach nobody.
+
+Set the version yourself in the same commit when you want a specific number,
+and the workflow leaves it alone. Run the workflow by hand with
+`bump_version` off to republish without a new version.
+
+A new **ISO** is still a separate, deliberate step: run **Build OmniOS ISO**,
+then **Release OmniOS ISO**, and add a `CHANGELOG.md` section for the version
+being released.
 
 New installs get the change from the ISO, and existing installs get it from the APT repository within a day, on the normal `unattended-upgrades` schedule. `scripts/check-project.sh` verifies that every path the package claims to ship exists in the ISO tree, so the two cannot drift apart.
 
