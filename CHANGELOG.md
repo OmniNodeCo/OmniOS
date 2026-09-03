@@ -2,6 +2,29 @@
 
 All notable changes to OmniOS Desktop are documented in this file.
 
+## [2026.1.2] - 2026-09-03
+
+OmniOS Desktop 2026.1.2 makes automatic updates actually reach installed
+systems. 2026.1.1 shipped the update channel but nothing was ever delivered
+through it, and adding the OmniOS repository to the image broke the build.
+There is no change to the package selection or desktop layout.
+
+### Fixed
+
+- Fixed installed systems never receiving an OmniOS update. Publishing rebuilt `omnios-desktop` under the version already in `version.txt`, and APT only offers an upgrade when the candidate version is higher than the installed one, so a machine fetched the new package, compared it against an identical version, and correctly did nothing. The patch version is now incremented automatically whenever the packaged files change, so a republished archive is a genuine upgrade.
+- Fixed the update channel never being published at all. The publish step was conditional on two signing secrets that were never configured, so every run reported success while silently skipping publication and leaving `docs/repo` absent. The archive signing key is now generated on the first run and reused afterwards, so updates work with no manual setup, and configured secrets still take precedence.
+- Fixed adding the OmniOS repository breaking the image build. `omnios.sources` shipped enabled and pointed at an archive that had not been published, so the `apt update` that live-build runs inside the chroot failed with a 404 and aborted the build. The source now ships disabled and `omnios-firstboot` enables it on an installed system, but only once it has confirmed the archive responds and the signing key is present, so a machine is never left with an apt source that breaks every update.
+- Fixed the image build failing at `desktop-base`, which owns `/etc/xdg/kcm-about-distrorc`. Writing that conffile directly made dpkg stop and ask how to resolve the conflict, and with no stdin during a build the prompt failed the package and everything depending on it, including `task-desktop` and `task-kde-desktop`. It is now diverted, the supported way for one package to replace another's conffile, which also prevents the same prompt from stalling unattended upgrades on installed systems.
+- Fixed a dangerous `dpkg-divert --rename` on `/usr/lib/os-release`, which belongs to the Essential `base-files` package. The diversion now uses `--no-rename` and keeps Debian's copy aside explicitly, so the system is never momentarily left without an `os-release`.
+- Deferred the OmniOS identity to the end of the image build, so Debian packages configured earlier in the same run resolve against Debian's own `os-release` rather than failing on an unrecognised distribution.
+- Made the `omnios-desktop` maintainer scripts non-fatal, so a branding step that cannot complete warns instead of leaving the package half-configured and failing every package that depends on it.
+
+### Build and release engineering
+
+- Added `scripts/bump-version.sh`, and skipped the automatic bump when a commit sets `version.txt` itself, so a deliberate version choice is respected and the workflow's own publish commit cannot trigger a further build.
+- Added the full build log as a workflow artifact and a failure summary that prints the actual `dpkg` error with its surrounding context, because live-build reports only which packages failed and never why.
+- Added validation that rejects an enabled `omnios.sources` and any `--rename` diversion of `os-release`, so both build-breaking mistakes are caught before they reach CI.
+
 ## [2026.1.1] - 2026-08-29
 
 OmniOS Desktop 2026.1.1 is a maintenance release. It corrects the operating-system identity shown on the desktop and improves how images are published, with no change to the package selection or desktop layout of 2026.1.
@@ -16,16 +39,9 @@ OmniOS Desktop 2026.1.1 is a maintenance release. It corrects the operating-syst
 - Added the `omnios-desktop` package and a signed OmniOS APT repository, so OmniOS's own identity, branding and system integration changes reach installed systems through automatic updates instead of only through a new ISO.
 - Added a signing-key workflow that generates the archive key, encrypts the private half with a transport passphrase before uploading it, and stores the release secrets automatically where permissions allow.
 - Added an APT repository workflow that rebuilds the repository whenever the packaged files change, verifying with a real `apt-get update` that APT resolves the expected version.
-- Added automatic patch-version bumping when the packaged files change, so a published rebuild is actually offered as an upgrade by APT instead of matching the installed version and reaching nobody.
-- Made update publishing work without any manual setup: the APT repository workflow now generates and reuses its own archive signing key when no secret is configured, instead of skipping publication and leaving installed systems with no update channel.
 - Published the APT repository from `docs/repo` in the git repository and served it over `raw.githubusercontent.com`, so updates need no GitHub Pages setup and the archive URL works as soon as the publish commit lands.
 - Added `origin=OmniOS` to the unattended-upgrades allowlist, and carried the OmniOS repository and signing key onto installed systems during Calamares installation.
 - Installed `omnios-desktop` into the image during the ISO build, so `dpkg` owns the OmniOS files and APT can upgrade them, and moved the identity setup into the package so an installed system and a freshly built ISO are configured the same way.
-- Fixed the image build failing with a 404 on the OmniOS archive: the apt source now ships disabled and `omnios-firstboot` enables it on an installed system once the archive is confirmed reachable, so a not yet published repository cannot break `apt update` during a build.
-- Fixed a dangerous `dpkg-divert --rename` on `/usr/lib/os-release`, which belongs to the Essential `base-files` package; the diversion now uses `--no-rename` and keeps Debian's copy aside explicitly, so the system is never left without an `os-release`.
-- Fixed the image build failing at `desktop-base`, which owns `/etc/xdg/kcm-about-distrorc`: writing that conffile directly made dpkg stop and ask how to resolve it, and with no stdin during a build the prompt failed the package and everything depending on it. It is now diverted, the supported way for one package to replace another's conffile.
-- Deferred the OmniOS identity to the end of the image build, so `desktop-base` and the desktop tasks configure against Debian's own `os-release` instead of failing on an unrecognised distribution and aborting the build.
-- Made the `omnios-desktop` maintainer scripts non-fatal, so a branding step that cannot complete warns instead of leaving the package half-configured and failing every package that depends on it, such as `desktop-base` and `task-kde-desktop`.
 - Kept `omnios-desktop` off the Debian installer's package-removal list, which would otherwise have uninstalled it during installation and taken the OmniOS identity and update channel with it.
 - Added APT download retries and longer timeouts so a single dropped CDN connection no longer fails a build that fetches over two thousand packages.
 - Added `scripts/build-vars.sh` and `scripts/verify-iso.sh`, so the ISO name, checksum filename, and release tag are derived from `version.txt` by the repository rather than repeated inside the CI workflow.
