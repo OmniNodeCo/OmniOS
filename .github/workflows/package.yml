@@ -9,7 +9,12 @@ on:
   workflow_dispatch:
     inputs:
       publish:
-        description: Publish the repository to GitHub Pages
+        description: Publish the repository so installed systems receive it
+        required: false
+        default: true
+        type: boolean
+      bump_version:
+        description: Increment the patch version before publishing
         required: false
         default: true
         type: boolean
@@ -41,11 +46,36 @@ jobs:
     steps:
       - name: Check out OmniOS
         uses: actions/checkout@v5
+        with:
+          # The bump step compares against the previous commit, and the publish
+          # step pushes, so the default single-commit checkout is not enough.
+          fetch-depth: 0
 
       - name: Install packaging tools
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends dpkg-dev gnupg
+
+      - name: Bump the patch version
+        # APT only offers an upgrade when the candidate version is higher than
+        # the installed one, so republishing under the same version reaches
+        # nobody. Bump automatically when the packaged files changed, unless
+        # this run was started by hand with bump_version off, or the pushed
+        # commit already changed version.txt itself.
+        if: inputs.bump_version != false
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT" == 'push' && -n "$BEFORE" ]] \
+            && git diff --name-only "$BEFORE" "$GITHUB_SHA" 2>/dev/null \
+              | grep -qx 'version.txt'; then
+            echo "version.txt was set to $(scripts/read-version.sh) by this commit; leaving it alone."
+            exit 0
+          fi
+          previous="$(scripts/read-version.sh)"
+          next="$(scripts/bump-version.sh)"
+          echo "Bumped OmniOS $previous -> $next"
 
       - name: Read version
         id: vars
@@ -175,13 +205,16 @@ jobs:
           # the archive.
           git add -A docs/repo docs/.nojekyll
           git add -A keys config/includes.chroot/usr/share/keyrings 2>/dev/null || true
+          # version.txt was bumped for this publish; without it the next run
+          # would rebuild the same version and APT would offer no upgrade.
+          git add -A version.txt
 
           if git diff --cached --quiet; then
             echo 'Published repository is already up to date.'
             exit 0
           fi
 
-          git commit -m "repo: publish OmniOS $VERSION APT repository [skip ci]"
+          git commit -m "repo: publish OmniOS $VERSION [skip ci]"
 
           # Retry once: another push can land between the checkout and here.
           if ! git push origin "HEAD:$GITHUB_REF_NAME"; then
