@@ -54,6 +54,10 @@ struct omni_wm {
     /* optional wallpaper hook: if set, omni_wm_paint() calls it to draw
      * the desktop background instead of the built-in gradient.           */
     void (*draw_background)(struct omni_wm *wm);
+    /* optional frame-finish hook: called after every omni_wm_paint() so
+     * the shell can draw its always-on-top chrome (taskbar/menu/cursor)
+     * and then present/flip the buffer as one final step.                */
+    void (*finish)(struct omni_wm *wm);
     struct omni_client clients[OMNI_WM_MAX_CLI];
 
     struct omni_win wins[OMNI_WM_MAX_WIN];

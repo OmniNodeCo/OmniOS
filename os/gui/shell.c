@@ -25,6 +25,9 @@
 #include "shell.h"
 #include "wm.h"
 
+#define OMNI_WM_CURSOR_W 12        /* cursor sprite width, px           */
+#define OMNI_WM_CURSOR_H 12        /* cursor sprite height, px          */
+
 /* ------------------------------------------------------------------ */
 /* global desktop state                                               */
 /* ------------------------------------------------------------------ */
@@ -34,6 +37,12 @@ static struct raster    g_screen;
 static int g_px, g_py;              /* pointer (mouse) position           */
 static int g_mx, g_my;              /* start-menu top-left origin         */
 static int g_menu_open;             /* start menu visible                 */
+
+/* scratch client-rect for the mouse-cursor sprite (rows padded by 1 px)  */
+static uint32_t g_cursor_scratch[OMNI_WM_CURSOR_W * OMNI_WM_CURSOR_H
+                                 + OMNI_WM_CURSOR_W + 1];
+
+static struct canvas g_cursor_cv;   /* bound to the cursor scratch         */
 
 static const struct omni_menu_item g_menu[] = {
     { "Terminal",     "/usr/bin/omnios-term" },
@@ -48,8 +57,109 @@ static const int g_menu_n = (int)(sizeof(g_menu) / sizeof(g_menu[0]));
 static const int TASKBAR_H = 30;
 
 /* ------------------------------------------------------------------ */
+/* horizontal flip control                                            */
+/* ------------------------------------------------------------------ */
+
+/* 1 = mirror the finished frame before the host scans it out.  Some
+ * virtual display paths present the framebuffer right-to-left, which makes
+ * left-to-right text look reversed AND mirror every glyph at once.  Default
+ * ON; boot with `omnios.flip=0` on the kernel command line to disable. */
+static int g_flip = 1;
+
+static int shell_flip_enabled(void)
+{
+    static int decided = 0;
+    if (!decided) {
+        FILE *f = fopen("/proc/cmdline", "r");
+        char buf[512] = { 0 };
+        decided = 1;
+        if (f) {
+            if (fgets(buf, sizeof(buf), f) && strstr(buf, "omnios.flip=0"))
+                g_flip = 0;
+            fclose(f);
+        }
+    }
+    return g_flip;
+}
+
+/* ------------------------------------------------------------------ */
+/* mouse cursor                                                       */
+/* ------------------------------------------------------------------ */
+
+/* Build the arrow sprite into g_cursor_scratch (white fill, dark
+ * outline, classic north-west arrow), once per session. */
+static void cursor_sprite_build(void)
+{
+    const uint32_t fill = 0xffffffffu;   /* white   */
+    const uint32_t outl = 0xff000000u;   /* outline */
+    int y, x;
+
+    for (y = 0; y < OMNI_WM_CURSOR_H; y++) {
+        for (x = 0; x <= y && x < OMNI_WM_CURSOR_W; x++)
+            raster_px(&g_cursor_cv.r,
+                      x, y, (x == 0 || x == y || y == 0) ? outl : fill);
+    }
+    for (y = 4; y <= 6; y++)
+        for (x = 4; x <= 11; x++)
+            raster_px(&g_cursor_cv.r,
+                      x, y, (y == 4 || y == 6 || x == 11) ? outl : fill);
+}
+
+/* Paint the cursor sprite onto the framebuffer at (g_px, g_py).
+ * Sprite pixels are either transparent (0) or opaque (white fill /
+ * black outline); opaque colors are written verbatim.  Because only
+ * this 12x12 patch is touched, it double-paints cleanly on top of
+ * whatever the last wallpaper/window paint left underneath. */
+static void cursor_draw(void)
+{
+    int sy, sx;
+
+    for (sy = 0; sy < OMNI_WM_CURSOR_H; sy++) {
+        int dsty = g_py + sy;
+        if (dsty < 0 || dsty >= g_screen.h)
+            continue;
+        for (sx = 0; sx < OMNI_WM_CURSOR_W; sx++) {
+            int dstx = g_px + sx;
+            uint32_t sc;
+            if (dstx < 0 || dstx >= g_screen.w)
+                continue;
+            sc = g_cursor_cv.r.bits[(size_t)sy * (size_t)g_cursor_cv.r.stride
+                                    + (size_t)sx];
+            if (sc != 0)
+                raster_px(&g_screen, dstx, dsty, sc);
+        }
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* frame finish (chrome on top + device presentation)                */
+/* ------------------------------------------------------------------ */
+
+/* forward declarations (definitions live further down) */
+static void draw_taskbar(struct omni_wm *wm, struct raster *r);
+static void draw_menu(struct raster *r, int x, int y, int w, int n);
+
+/* Called by omni_wm_paint() after the wallpaper and windows are in place:
+ * draw the always-on-top taskbar/start-menu and the mouse cursor, then
+ * horizontally mirror the finished frame.  The mirror compensates for
+ * hosts whose scanout runs right-to-left (symptoms: text left-to-right
+ * order reversed AND every glyph mirrored at once). */
+static void shell_finish(struct omni_wm *wm)
+{
+    draw_taskbar(wm, &wm->screen);
+    if (g_menu_open)
+        draw_menu(&wm->screen, g_mx, g_my, 200, g_menu_n);
+    cursor_draw();
+    if (shell_flip_enabled())
+        raster_mirror_h(&wm->screen);
+}
+
+/* ------------------------------------------------------------------ */
 /* pointer motion                                                     */
 /* ------------------------------------------------------------------ */
+
+/* clamp a delta so the cursor can never cross the desktop        */
+#define OMNI_WARP_CLAMP(v, lo, hi) ((v) < (lo) ? (lo) : (v) > (hi) ? (hi) : (v))
 
 static void omni_shell_warp(int dx, int dy)
 {
@@ -58,12 +168,30 @@ static void omni_shell_warp(int dx, int dy)
     if (dy > 63)   dy -= 128;
     if (dy < -64)  dy += 128;
 
-    g_px += dx;
-    g_py += dy;
-    if (g_px < 0) g_px = 0;
-    if (g_py < 0) g_py = 0;
-    if (g_px >= g_screen.w) g_px = g_screen.w - 1;
-    if (g_py >= g_screen.h) g_py = g_screen.h - 1;
+    /* The finished frame is horizontally mirrored before scanout (the
+     * host presents the buffer right-to-left), so horizontal mouse motion
+     * must be inverted for the visible cursor to track the host pointer.
+     * Vertical motion is unaffected by a horizontal mirror. */
+    if (shell_flip_enabled())
+        dx = -dx;
+
+    /* Curves are applied after 9-bit unfolding, so anything beyond one
+     * byte per event cannot happen with sane devices. */
+    dx = OMNI_WARP_CLAMP(dx, -255, 255);
+    dy = OMNI_WARP_CLAMP(dy, -255, 255);
+
+    {
+        int nx = g_px, ny = g_py;
+
+        if (dx != 0)
+            nx = OMNI_WARP_CLAMP(g_px + dx, 0, g_screen.w - 1);
+        if (dy != 0)
+            ny = OMNI_WARP_CLAMP(g_py + dy, 0, g_screen.h - 1);
+
+        if (nx != g_px) g_px = nx;
+        if (ny != g_py) g_py = ny;
+    }
+
 }
 
 /* ------------------------------------------------------------------ */
@@ -336,8 +464,18 @@ void omni_shell_run(void)
 
     g_screen = fb_raster(&fb);
 
+    /* The mouse-cursor sprite is a private scratch raster (native 32-bit)
+     * so it can be painted over the framebuffer without touching device
+     * pixel-format conversion. */
+    raster_init(&g_cursor_cv.r, g_cursor_scratch,
+                OMNI_WM_CURSOR_W, OMNI_WM_CURSOR_H, OMNI_WM_CURSOR_W);
+    g_cursor_cv.fg = 0xffffffffu;
+    g_cursor_cv.bg = 0;
+    cursor_sprite_build();
+
     omni_wm_init(&g_wm, &g_screen);
     g_wm.draw_background = shell_draw_background;
+    g_wm.finish = shell_finish;
 
     if (omni_wm_start(&g_wm) != 0)
         omni_console_puts("desktop: WARN display socket not started\n");
@@ -355,6 +493,9 @@ void omni_shell_run(void)
     omni_shell_open_initial_windows();
     g_px = g_screen.w / 2;
     g_py = g_screen.h / 2;
+
+    /* first paint (wallpaper + welcome window + chrome + mirror) */
+    omni_wm_paint(&g_wm);
 
     for (;;) {
         time_t t = time(NULL);
@@ -394,8 +535,8 @@ void omni_shell_run(void)
         while (omni_input_next(&e) == 0) {
             if (e.type == 2) {                       /* mouse motion */
                 omni_shell_warp(e.dx, e.dy);
-                if (omni_wm_motion(&g_wm, g_px, g_py) == 1)
-                    redraw = 1;
+                omni_wm_motion(&g_wm, g_px, g_py);
+                redraw = 1;
             } else if (e.type == 3) {                 /* button */
                 if (e.pressed && shell_button(g_px, g_py))
                     redraw = 1;
@@ -415,12 +556,9 @@ void omni_shell_run(void)
             redraw = 1;
         }
 
-        if (redraw) {
-            omni_wm_paint(&g_wm);            /* wallpaper + windows */
-            draw_taskbar(&g_wm, &g_screen);  /* always on top       */
-            if (g_menu_open)
-                draw_menu(&g_screen, g_mx, g_my, 200, g_menu_n);
-        }
+        if (redraw)
+            omni_wm_paint(&g_wm);            /* wallpaper + windows +
+                                                chrome + mirror (hook) */
     }
 
     omni_devs_close(&devs);

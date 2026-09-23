@@ -65,6 +65,15 @@ static int read_ev(struct omni_devs *d, int fd)
 
         switch (ie.type) {
         case EV_KEY:
+            /* Mouse buttons ride the EV_KEY event type on evdev; keep
+             * them out of the keyboard stream.  1=left 2=middle 3=right. */
+            switch (ie.code) {
+            case BTN_LEFT:   omni_input_push_button(1, ie.value); continue;
+            case BTN_MIDDLE: omni_input_push_button(2, ie.value); continue;
+            case BTN_RIGHT:  omni_input_push_button(3, ie.value); continue;
+            default:
+                break;
+            }
             if (ie.value >= 0 && ie.value <= 2)
                 ev_key(ie.code, ie.value);
             break;
@@ -74,7 +83,9 @@ static int read_ev(struct omni_devs *d, int fd)
             else if (ie.code == REL_Y)
                 omni_input_push_mouse(0, ie.value);
             else if (ie.code == REL_WHEEL)
-                omni_input_push_button(ie.value > 0 ? 4 : 5, 0);
+                omni_input_push_button(ie.value > 0 ? 4 : 5, 1);
+            else if (ie.code == REL_HWHEEL)
+                omni_input_push_button(ie.value > 0 ? 6 : 7, 1);
             break;
         default:
             break;
@@ -91,6 +102,7 @@ static int read_mice(struct omni_devs *d, int fd)
     unsigned char p[3];
     ssize_t n;
 
+    (void)d;
     for (;;) {
         n = read(fd, p, 3);
         if (n < 0) {
@@ -101,16 +113,16 @@ static int read_mice(struct omni_devs *d, int fd)
         if (n < 3)
             return 0;
 
-        if (p[0] & 0x08) /* always set in ImPS/2 */
-            omni_input_push_mouse((int)((int8_t)p[1]), (int)((int8_t)(-p[2])));
+        if (p[0] & 0x08) /* sync bit always set in ImPS/2 */
+            omni_input_push_mouse((int)(int8_t)p[1], (int)(int8_t)(-p[2]));
 
-        if (p[0] & 0x01)
-            omni_input_push_button(1, 1);
-        if (p[0] & 0x02)
-            omni_input_push_button(3, 1);
-        if (p[0] & 0x04)
-            omni_input_push_button(2, 1);
-        (void)d;
+        /* button transitions come on their own packet, so report the
+         * resulting state (press AND release) every time so the desktop
+         * sees a full click.  BTN_LEFT 1, BTN_MIDDLE 2 (bit 0x04),
+         * BTN_RIGHT 3 (bit 0x02). */
+        omni_input_push_button(1, (p[0] & 0x01) ? 1 : 0);
+        omni_input_push_button(2, (p[0] & 0x04) ? 1 : 0);
+        omni_input_push_button(3, (p[0] & 0x02) ? 1 : 0);
     }
 }
 

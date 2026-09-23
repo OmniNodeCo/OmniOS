@@ -388,6 +388,13 @@ void omni_wm_paint(struct omni_wm *wm)
                              w->x, dy, 0, src_y, w->w, src_h);
         paint_frame(wm, w);
     }
+
+    /* last step of the frame: shell chrome (taskbar/menu/cursor) plus any
+     * device presentation work (e.g. the horizontal mirror some hosts
+     * need).  Without this hook the shell's own redraw would duplicate the
+     * chrome and the mirror would only run on a subset of frames. */
+    if (wm->finish)
+        wm->finish(wm);
 }
 
 /* ------------------------------------------------------------------ */

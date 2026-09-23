@@ -220,6 +220,13 @@ def _vmx(iso_name, version):
         'ide1:0.deviceType = "cdrom-image"\n'
         'ide1:0.fileName = "%s"\n'
         'ide1:0.startConnected = "TRUE"\n'
+        # A real USB HID mouse is exposed to the guest so the desktop gets
+        # motion + button events over evdev (some host products only give
+        # the PS/2 pointer relative motion and drop the buttons).  This is
+        # the standard VMware controller+device plumbing for a USB mouse.
+        'usb.present = "TRUE"\n'
+        'usb:0.present = "TRUE"\n'
+        'usb:0.deviceType = "mouse"\n'
         'serial0.present = "TRUE"\n'
         'serial0.fileType = "file"\n'
         'serial0.fileName = "omnios-serial.log"\n'
