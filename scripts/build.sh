@@ -122,11 +122,19 @@ stage_binaries() {
     local mwbin="$BLD/install/microwindows/bin"
     local mwfonts="$BLD/install/microwindows/fonts"
     local bbin="$BLD/install/busybox"
-    mkdir -p "$mwbin" "$mwfonts" "$bbin"
+    local osbin="$BLD/install/os/bin"
+    mkdir -p "$mwbin" "$mwfonts" "$bbin" "$osbin"
     cp -f "$SRC/busybox/busybox" "$bbin/busybox" 2>/dev/null || true
     cp -f "$SRC"/microwindows/src/bin/* "$mwbin/" 2>/dev/null || true
     cp -f "$SRC"/microwindows/src/fonts/bdf/*.bdf "$mwfonts/" 2>/dev/null || true
     log "  staged binaries to $BLD/install"
+}
+
+stage_os() {
+    log "building the OmniOS core (PID 1 init, desktop shell, apps, libs)…"
+    require gcc make
+    make -C "$ROOT/os" all
+    log "  os binaries: $BLD/install/os/bin"
 }
 
 stage_rootfs() {
@@ -142,6 +150,7 @@ stage_kernel() {
     stage_musl
     stage_busybox
     stage_microwindows
+    stage_os
     stage_rootfs
     python3 "$ROOT/tools/make-config.py"
     (
@@ -175,13 +184,14 @@ case "$STAGE" in
     fetch)     stage_fetch ;;
     toolchain) stage_toolchain ;;
     musl)      stage_musl ;;
-    userspace) stage_toolchain; stage_musl; stage_busybox; stage_microwindows ;;
+    userspace) stage_toolchain; stage_musl; stage_busybox; stage_microwindows; stage_os ;;
+    os)        stage_os ;;
     rootfs)    stage_rootfs ;;
     kernel)    stage_kernel ;;
     iso)       stage_iso ;;
     clean)     stage_clean ;;
     full|all)  stage_fetch; stage_toolchain; stage_musl; stage_busybox; \
-               stage_microwindows; stage_rootfs; stage_kernel; stage_iso ;;
-    *) die "unknown stage: $STAGE (try fetch|toolchain|userspace|rootfs|kernel|iso|clean)" ;;
+               stage_microwindows; stage_os; stage_rootfs; stage_kernel; stage_iso ;;
+    *) die "unknown stage: $STAGE (try fetch|toolchain|userspace|os|rootfs|kernel|iso|clean)" ;;
 esac
 log "done."

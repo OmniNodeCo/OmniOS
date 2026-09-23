@@ -30,17 +30,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential bc cpio gzip perl python3 python3-pip \
-            mtools xorriso xz-utils zstd git ca-certificates
+            mtools xorriso xz-utils zstd git ca-certificates libc6-dev \
+            linux-libc-dev
           python3 -m pip install --user --break-system-packages kconfiglib pycdlib
 
       - name: Fetch upstream sources
         run: scripts/build.sh fetch
 
-      - name: Build toolchain + userspace + rootfs
+      - name: Build toolchain + userspace + OS core + rootfs
         run: |
           scripts/build.sh toolchain
           scripts/build.sh musl
           scripts/build.sh userspace
+          scripts/build.sh os
           scripts/build.sh rootfs
 
       - name: Build the kernel (with embedded initramfs)

@@ -34,12 +34,17 @@ VERSION = open(os.path.join(REPO, "version.txt")).read().strip()
 MW_BIN = os.path.join(REPO, "build", "install", "microwindows", "bin")
 MW_FONTS = os.path.join(REPO, "build", "install", "microwindows", "fonts")
 BB = os.path.join(REPO, "build", "install", "busybox")
+OS_BIN = os.path.join(REPO, "build", "install", "os", "bin")
 
 
 # ---- static file contents ------------------------------------------------
 _INIT = """\
 #!/bin/sh
 # OmniOS /init — the very first userspace process (ash, BusyBox).
+# Mounts the virtual filesystems, seeds /dev, then hands control to the
+# from-scratch PID 1 (/sbin/init -> /usr/bin/ominit). ominit itself also
+# performs these mounts, so if it is missing we fall back to the BusyBox
+# init/inittab path below.
 export PATH=/usr/bin:/bin:/sbin:/usr/sbin
 
 /bin/mount -t proc     proc     /proc
@@ -67,7 +72,13 @@ fi
 /bin/mdev -s 2>/dev/null || true
 
 echo "OmniOS ${VERSION} — booting."
-exec /sbin/init
+
+# Prefer the from-scratch PID 1.
+if [ -x /sbin/init ]; then
+    exec /sbin/init
+fi
+# Fallback: BusyBox init + /etc/inittab.
+exec /bin/busybox init
 """.replace("${VERSION}", VERSION)
 
 _INITTAB = """\
@@ -114,40 +125,43 @@ _DESKTOP = """\
 #!/bin/sh
 # OmniOS graphical desktop session.
 #
-# nano-X is the windowing server: it drives the framebuffer and reads the
-# keyboard (/dev/tty) and mouse (/dev/input/mice) directly. nawm is its
-# built-in window manager. Applications connect over the UNIX socket
-# (DISPLAY=:0) and are drawn in windows, desktop style.
+# Prefer the from-scratch OmniOS desktop shell (owns the framebuffer and runs
+# a window-manager/display-server on /tmp/.omnios-wm). If it is not present,
+# fall back to Nano-X (nano-X) with its window manager and demo apps.
 export PATH=/usr/bin:/bin:/sbin:/usr/sbin
 export DISPLAY=:0
 
-# Wait briefly for simpledrm to register /dev/fb0 (BIOS VESA or UEFI GOP).
+# Wait briefly for the kernel to register /dev/fb0 (simpledrm / VESA / GOP).
 i=0
 while [ ! -e /dev/fb0 ] && [ "$i" -lt 50 ]; do
     sleep 0.1 2>/dev/null || sleep 1
     i=$((i + 1))
 done
 
-if [ -e /dev/fb0 ]; then
-    echo "OmniOS: framebuffer detected, starting the desktop."
-    /usr/bin/nano-X -p &
-    NANOX_PID=$!
-    trap 'kill $NANOX_PID 2>/dev/null' INT TERM EXIT
-    # wait for the server socket before launching clients
-    i=0
-    while [ ! -S /tmp/.nano-X ] && [ "$i" -lt 50 ]; do
-        sleep 0.1 2>/dev/null || sleep 1
-        i=$((i + 1))
-    done
-    /usr/bin/nxterm -T "OmniOS Terminal" /bin/sh &
-    /usr/bin/nxclock &
-    /usr/bin/nxcalc &
-    wait $NANOX_PID
-else
-    echo "OmniOS: no framebuffer found — running text console only."
-    # keep a shell on the console as a fallback
+if [ ! -e /dev/fb0 ]; then
+    echo "OmniOS: no framebuffer found — text console only."
     exec /bin/sh
 fi
+
+if [ -x /usr/bin/omnios-desktop ]; then
+    echo "OmniOS: starting the desktop shell."
+    exec /usr/bin/omnios-desktop
+fi
+
+# Nano-X fallback (kept for reference/demos)
+echo "OmniOS: starting Nano-X desktop (fallback)."
+/usr/bin/nano-X -p &
+NANOX_PID=$!
+trap 'kill $NANOX_PID 2>/dev/null' INT TERM EXIT
+i=0
+while [ ! -S /tmp/.nano-X ] && [ "$i" -lt 50 ]; do
+    sleep 0.1 2>/dev/null || sleep 1
+    i=$((i + 1))
+done
+/usr/bin/nxterm -T "OmniOS Terminal" /bin/sh &
+/usr/bin/nxclock &
+/usr/bin/nxcalc &
+wait $NANOX_PID
 """
 
 _PROFILE = """\
@@ -237,6 +251,23 @@ def main():
         for f in sorted(os.listdir(MW_FONTS)):
             shutil.copy(os.path.join(MW_FONTS, f),
                         os.path.join(OUT, "etc", "fonts", f))
+
+    # ---- OmniOS core binaries (from-scratch kernel core + GUI) -------------
+    # ominit            the PID-1 init (replaces BusyBox init)
+    # omnios-desktop    the desktop shell (window manager + display server)
+    # omnios-*          bundled desktop apps
+    for b in ("ominit", "omnios-desktop", "omnios-term", "omnios-files",
+              "omnios-calc", "omnios-edit", "omnios-sysinfo", "omnios-about"):
+        s = os.path.join(OS_BIN, b)
+        if os.path.exists(s):
+            dst = os.path.join(OUT, "usr", "bin", b)
+            shutil.copy(s, dst)
+            os.chmod(dst, 0o755)
+    # ominit doubles as /sbin/init (PID 1) and /init's exec target
+    ominit = os.path.join(OS_BIN, "ominit")
+    if os.path.exists(ominit):
+        shutil.copy(ominit, os.path.join(OUT, "sbin", "init"))
+        os.chmod(os.path.join(OUT, "sbin", "init"), 0o755)
 
     # ---- /init and /etc ----------------------------------------------------
     w("init", _INIT, 0o755)

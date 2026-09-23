@@ -23,6 +23,14 @@ jobs:
         run: |
           python3 -m py_compile tools/*.py
 
+      - name: Compile-check the OS core (syntax only, host gcc)
+        run: |
+          for f in $(find os -name '*.c' | sort); do
+            gcc -std=c99 -Wall -Wextra -D_GNU_SOURCE \
+                -I os/lib -I os/gui -I os/kernel -I os/apps \
+                -fsyntax-only "$f"
+          done
+
       - name: Shell-check scripts
         run: |
           sudo apt-get update

@@ -1,7 +1,7 @@
 # OmniOS top-level Makefile — thin wrapper over scripts/build.sh
 # Targets map 1:1 to build stages. Run `make help` for the list.
 
-.PHONY: help fetch toolchain musl userspace rootfs kernel iso full clean
+.PHONY: help fetch toolchain musl userspace os rootfs kernel iso full clean
 
 help:
 	@echo "OmniOS build targets:"
@@ -9,6 +9,7 @@ help:
 	@echo "  make toolchain   bc + kernel headers"
 	@echo "  make musl        musl libc into build/sysroot"
 	@echo "  make userspace   musl + busybox + microwindows"
+	@echo "  make os          build the OmniOS core (init + desktop + apps)"
 	@echo "  make rootfs      assemble build/rootfs"
 	@echo "  make kernel      configure + build the Linux kernel"
 	@echo "  make iso         assemble the bootable ISO"
@@ -26,6 +27,9 @@ musl:
 
 userspace:
 	scripts/build.sh userspace
+
+os:
+	scripts/build.sh os
 
 rootfs:
 	scripts/build.sh rootfs
