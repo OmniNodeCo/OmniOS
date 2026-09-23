@@ -23,13 +23,26 @@ extern "C" {
 /* Framebuffer (mmap of /dev/fb0)                                      */
 /* ------------------------------------------------------------------ */
 
+/* Device pixel format: maps canonical 32-bit ARGB colours onto the real
+ * channel layout the kernel reports through fb_var_screeninfo.  A zeroed
+ * descriptor (bpp == 0) means "native 32-bit word, no conversion".   */
+struct omni_pixfmt {
+    int  bpp;                        /* bits per pixel (0 = native)  */
+    int  bytes;                      /* bytes per pixel              */
+    int  r_shift, g_shift, b_shift;  /* channel bit offsets          */
+    int  r_loss,  g_loss,  b_loss;   /* 8 - channel length           */
+    int  r_len,   g_len,   b_len;    /* channel lengths              */
+    int  a_shift, a_loss, a_len;     /* alpha channel (or -1 / none) */
+};
+
 struct osfb {
     int fd;                    /* /dev/fb0 file descriptor            */
-    uint32_t *mem;             /* mmap'd framebuffer (BGRA32)         */
+    uint32_t *mem;             /* mmap'd framebuffer                  */
     uint32_t  size;            /* bytes mapped                        */
     int       w, h;            /* visible width/height                */
     int       stride;          /* in pixels                           */
     int       depth;           /* bits per pixel                      */
+    struct omni_pixfmt fmt;    /* device channel layout (packer)      */
     char     *name;            /* framebuffer id                      */
 };
 
@@ -37,7 +50,7 @@ struct osfb {
 int  osfb_open(struct osfb *fb, const char *dev);
 void osfb_close(struct osfb *fb);
 
-/* View the mapped framebuffer as a raster (BGRA32, possibly with stride). */
+/* View the mapped framebuffer as a raster (device format aware). */
 struct raster fb_raster(const struct osfb *fb);
 
 /* Blocking wait for /dev/fb0 (kernel simpledrm can take a moment).  */
@@ -142,9 +155,38 @@ uint32_t omni_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a);
 uint32_t omni_rgb(uint8_t r, uint8_t g, uint8_t b);
 uint32_t omni_mix(uint32_t dst, uint32_t src); /* src over dst         */
 
+/* ------------------------------------------------------------------ */
+/* Framebuffer pixel format (canonical ARGB -> device)                 */
+/*                                                                     */
+/* The kernel hands us a framebuffer whose channel layout is described  */
+/* by fb_var_screeninfo red/green/blue/transp offset+length.  The      */
+/* raster layer only ever holds canonical 32-bit ARGB colours (as      */
+/* produced by omni_rgb()), so every write to the screen is converted  */
+/* through omni_pack_color() using this descriptor.  A zeroed          */
+/* descriptor (bpp == 0) means "native 32-bit word, no conversion".    */
+/* ------------------------------------------------------------------ */
+
+/* Build a descriptor from fb_var_screeninfo channel info. */
+struct omni_pixfmt omni_pixfmt_from_var(uint32_t bpp,
+                                        int r_off, int r_len,
+                                        int g_off, int g_len,
+                                        int b_off, int b_len,
+                                        int a_off, int a_len);
+
+/* 1 when the descriptor is the BGRA32 / XRGB32 layout the code natively
+ * speaks (blue LSB, red at bit 16, 8 bits each). */
+int  omni_pixfmt_native(const struct omni_pixfmt *pf);
+
+/* Convert a canonical ARGB colour into a device-format word. */
+uint32_t omni_pack_color(const struct omni_pixfmt *pf, uint32_t argb);
+
+/* Human-readable summary for diagnostics (e.g. "bpp32 r16/8 g8/8 b0/8"). */
+void omni_pixfmt_describe(const struct omni_pixfmt *pf, char *out, size_t n);
+
 struct raster {
     uint32_t *bits;
     int w, h, stride;
+    struct omni_pixfmt fmt;          /* device pixel format (0 = native) */
 };
 
 void     raster_init(struct raster *r, void *bits, int w, int h, int stride);

@@ -50,6 +50,25 @@ int osfb_open(struct osfb *fb, const char *dev)
     if (fb->stride <= 0)
         fb->stride = fb->w;
 
+    /* Describe how red/green/blue/alpha sit inside a pixel so the raster
+     * layer maps canonical ARGB colours onto the real device layout instead
+     * of blindly assuming BGRA32. */
+    fb->fmt = omni_pixfmt_from_var((uint32_t)vinfo.bits_per_pixel,
+                                   (int)vinfo.red.offset,   (int)vinfo.red.length,
+                                   (int)vinfo.green.offset, (int)vinfo.green.length,
+                                   (int)vinfo.blue.offset,  (int)vinfo.blue.length,
+                                   (int)vinfo.transp.offset,(int)vinfo.transp.length);
+    {
+        char line[128];
+        char fmtbuf[64];
+        omni_pixfmt_describe(&fb->fmt, fmtbuf, sizeof(fmtbuf));
+        snprintf(line, sizeof(line),
+                 "desktop: fb0 %dx%d stride=%d bpp=%d fmt=%s line=%u smem=%u\n",
+                 fb->w, fb->h, fb->stride, fb->depth, fmtbuf,
+                 (unsigned)finfo.line_length, (unsigned)finfo.smem_len);
+        omni_console_puts(line);
+    }
+
     mapsz = (size_t)finfo.smem_len;
     if (mapsz == 0)
         mapsz = (size_t)fb->stride * (size_t)fb->h * 4u;
@@ -78,6 +97,7 @@ struct raster fb_raster(const struct osfb *fb)
     r.w = fb->w;
     r.h = fb->h;
     r.stride = fb->stride > 0 ? fb->stride : fb->w;
+    r.fmt = fb->fmt;
     return r;
 }
 
