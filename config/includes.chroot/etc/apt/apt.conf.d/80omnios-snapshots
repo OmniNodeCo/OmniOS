@@ -1,2 +1,0 @@
-DPkg::Pre-Invoke { "/usr/libexec/omnios-apt-snapshot pre || true"; };
-DPkg::Post-Invoke { "/usr/libexec/omnios-apt-snapshot post || true"; };

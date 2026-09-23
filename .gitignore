@@ -2,6 +2,9 @@
 build/
 .cache/
 
+# Upstream source checkouts (git-cloned; see README "Build")
+src/
+
 # Generated release files
 out/
 *.iso
