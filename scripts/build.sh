@@ -108,7 +108,44 @@ stage_busybox() {
     log "building BusyBox (static, musl)…"
     require gcc
     [ -x "$SRC/busybox/busybox" ] && { log "  busybox (already built)"; return; }
-    cp "$ROOT/tools/config/busybox.config" "$SRC/busybox/.config"
+    local bbcfg="$SRC/busybox/.config" tmp="$SRC/busybox/.config.omnios"
+    # Start from a full upstream defaults tree so dependencies are satisfied
+    # and no NEW symbol can prompt; then overlay our curated options.
+    make -C "$SRC/busybox" mrproper >/dev/null 2>&1 || true
+    make -C "$SRC/busybox" defconfig >/dev/null 2>&1
+    awk 'NR==FNR {
+            raw=$0;
+            if (raw ~ /^[ \t]*CONFIG_[A-Za-z0-9_]+=/) {           # on-line
+                k=raw; sub(/^[ \t]*/,"",k); split(k,a,"=");
+                val[a[1]]=a[2]; off[a[1]]=0;
+            } else if (raw ~ /^[ \t]*# CONFIG_[A-Za-z0-9_]+ is not set/) {
+                k=raw; sub(/^[ \t]*#[ \t]*/,"",k); sub(/[ \t]*is not set[ \t]*$/,"",k);
+                val[k]=""; off[k]=1;                                # off-line
+            }
+            next;
+        } {
+            k=$1; if ($0 ~ /^# CONFIG_/) { k=$2 }
+            sub(/^#/,"",k); sub(/=.*/,"",k);
+            if (k in val) {
+                if (off[k]) printf "# %s is not set\n", k;
+                else        printf "%s=%s\n", k, val[k];
+                delete val[k]; delete off[k];
+            } else {
+                print;
+            }
+        } END {
+            for (k in val) {
+                if (off[k]) printf "# %s is not set\n", k;
+                else        printf "%s=%s\n", k, val[k];
+            }
+        }' \
+        "$ROOT/tools/config/busybox.config" "$bbcfg" > "$tmp"
+    mv "$tmp" "$bbcfg"
+    # Everything NEW is already answered; this just normalises the config.
+    make -C "$SRC/busybox" oldconfig </dev/null >/dev/null 2>&1 || true
+    # Record the resolved config for inspection/reproducibility.
+    mkdir -p "$BLD"
+    cp "$bbcfg" "$BLD/busybox.config.resolved"
     make -C "$SRC/busybox" -j"$JOBS" \
         CC="$SIM/usr/bin/musl-gcc" \
         CONFIG_STATIC=y
