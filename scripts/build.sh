@@ -35,19 +35,27 @@ require() {
 stage_fetch() {
     log "fetching upstream sources (git)…"
     mkdir -p "$SRC"
-    clone() { # name url [branch]
-        if [ -d "$SRC/$1/.git" ]; then
-            log "  $1 (present)"
-        else
-            log "  $1 (cloning)"
-            git clone --depth 1 ${3:+--branch "$3"} "$2" "$SRC/$1"
+    clone() { # name url [ref]
+        local dst="$SRC/$1" ref="$3" cur
+        if [ -d "$dst/.git" ]; then
+            cur="$(git -C "$dst" describe --tags --exact-match 2>/dev/null || true)"
+            if [ -n "$ref" ] && [ "$cur" != "$ref" ]; then
+                log "  $1 (re-cloning: want $ref, have ${cur:-branch HEAD})"
+                rm -rf "$dst"
+            else
+                log "  $1 (present)"
+            fi
         fi
+        [ -d "$dst/.git" ] || {
+            log "  $1 (cloning)"
+            git clone --depth 1 ${ref:+--branch "$ref"} "$2" "$dst"
+        }
     }
     clone linux        https://github.com/torvalds/linux.git        v6.12
     clone musl         https://github.com/ifduyue/musl.git           v1.2.6
     clone busybox      https://github.com/mirror/busybox.git         1_36_1
     clone microwindows https://github.com/ghaerr/microwindows.git
-    clone bc           https://github.com/gavinhoward/bc.git
+    clone bc           https://github.com/gavinhoward/bc.git          7.1.0
     # apply the reproducible kernel edits
     (
         cd "$SRC/linux"
@@ -65,9 +73,9 @@ stage_toolchain() {
     require gcc make git python3
     [ -x "$SRC/bc/bin/bc" ] || {
         cd "$SRC/bc"
-        # bc-only, optimised, no NLS. (Recent bc changed `-s` from a bare
-        # strip toggle to `-s SETTING`; `-b/-N/-O` are stable across both.)
-        ./configure.sh -O2 -b -N
+        # bc 7.1.0, bc-only, optimised, no NLS. Long-form flags only:
+        # newer bc reused `-s` for `-s SETTING`, which broke short forms.
+        ./configure.sh --bc-only --disable-nls --opt=2
         make -j"$JOBS"
     }
     log "  bc ok: $SRC/bc/bin/bc"
