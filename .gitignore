@@ -5,6 +5,9 @@ build/
 # Upstream source checkouts (git-cloned; see README "Build")
 src/
 
+# C objects left by the os/ build (built in-tree, installed into build/)
+*.o
+
 # Generated release files
 out/
 *.iso

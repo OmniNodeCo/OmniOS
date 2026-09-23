@@ -115,8 +115,10 @@ if [ -c /dev/ttyS0 ]; then
 fi
 
 # Bring up the graphical desktop if we are on the active console.
-if [ -x /usr/bin/omnios-desktop ]; then
-    /usr/bin/omnios-desktop &
+# (Only reached under the BusyBox-init fallback; ominit spawns the desktop
+# binary itself and never runs rcS.)
+if [ -x /etc/init.d/desktop ]; then
+    /etc/init.d/desktop &
 fi
 exit 0
 """
@@ -221,6 +223,26 @@ def main():
               "run", "var", "var/log", "var/run", "mnt", "root", "home/omnios"):
         os.makedirs(os.path.join(OUT, d), exist_ok=True)
 
+    # ---- OmniOS core binaries (from-scratch kernel core + GUI) -------------
+    # ominit            the PID-1 init (replaces BusyBox init)
+    # omnios-desktop    the desktop shell (window manager + display server)
+    # omnios-*          bundled desktop apps
+    for b in ("ominit", "omnios-desktop", "omnios-term", "omnios-files",
+              "omnios-calc", "omnios-edit", "omnios-sysinfo", "omnios-about"):
+        s = os.path.join(OS_BIN, b)
+        if os.path.exists(s):
+            dst = os.path.join(OUT, "usr", "bin", b)
+            shutil.copy(s, dst)
+            os.chmod(dst, 0o755)
+    # ominit doubles as /sbin/init (PID 1) and /init's exec target.
+    # Install it BEFORE the BusyBox /sbin aliases below: overlaying a plain
+    # file onto an absolute symlink would otherwise follow the link and try
+    # to write the host's /bin/busybox (PermissionError).
+    ominit = os.path.join(OS_BIN, "ominit")
+    if os.path.exists(ominit):
+        shutil.copy(ominit, os.path.join(OUT, "sbin", "init"))
+        os.chmod(os.path.join(OUT, "sbin", "init"), 0o755)
+
     # ---- BusyBox and applet symlinks --------------------------------------
     if os.path.exists(bb):
         shutil.copy(bb, os.path.join(OUT, "bin", "busybox"))
@@ -229,8 +251,8 @@ def main():
             dst = os.path.join(OUT, "bin", a)
             if not os.path.lexists(dst):
                 os.symlink("busybox", dst)
-        # /sbin and /usr/bin aliases for programs scripts and mdev expect
-        for a in ("init", "getty", "login", "mdev", "halt", "reboot",
+        # /sbin aliases for programs scripts and mdev expect (init is ominit)
+        for a in ("getty", "login", "mdev", "halt", "reboot",
                   "poweroff", "swapoff", "swapon", "blkid"):
             s = os.path.join(OUT, "sbin", a)
             if not os.path.lexists(s):
@@ -252,23 +274,6 @@ def main():
             shutil.copy(os.path.join(MW_FONTS, f),
                         os.path.join(OUT, "etc", "fonts", f))
 
-    # ---- OmniOS core binaries (from-scratch kernel core + GUI) -------------
-    # ominit            the PID-1 init (replaces BusyBox init)
-    # omnios-desktop    the desktop shell (window manager + display server)
-    # omnios-*          bundled desktop apps
-    for b in ("ominit", "omnios-desktop", "omnios-term", "omnios-files",
-              "omnios-calc", "omnios-edit", "omnios-sysinfo", "omnios-about"):
-        s = os.path.join(OS_BIN, b)
-        if os.path.exists(s):
-            dst = os.path.join(OUT, "usr", "bin", b)
-            shutil.copy(s, dst)
-            os.chmod(dst, 0o755)
-    # ominit doubles as /sbin/init (PID 1) and /init's exec target
-    ominit = os.path.join(OS_BIN, "ominit")
-    if os.path.exists(ominit):
-        shutil.copy(ominit, os.path.join(OUT, "sbin", "init"))
-        os.chmod(os.path.join(OUT, "sbin", "init"), 0o755)
-
     # ---- /init and /etc ----------------------------------------------------
     w("init", _INIT, 0o755)
     w("etc/inittab", _INITTAB)
@@ -289,7 +294,10 @@ def main():
       "sysfs /sys sysfs defaults 0 0\n"
       "tmpfs /tmp tmpfs defaults 0 0\n"
       "devpts /dev/pts devpts defaults 0 0\n")
-    w("usr/bin/omnios-desktop", _DESKTOP, 0o755)
+    # Desktop session launcher (shell). The from-scratch window manager is
+    # the COMPILED binary /usr/bin/omnios-desktop, copied above; this script
+    # waits for /dev/fb0 and starts it (Nano-X fallback for the BusyBox path).
+    w("etc/init.d/desktop", _DESKTOP, 0o755)
 
     print("make-rootfs: assembled %s" % OUT)
 
@@ -313,7 +321,7 @@ _APPLETS = [
     "gzip", "gunzip", "uname", "df", "du", "free", "uptime", "setterm",
     "stty", "tty", "pwd", "true", "false", "test", "yes", "printf", "mknod",
     "expr", "basename", "dirname", "which", "passwd", "adduser", "chroot",
-    "fsck", "mkfs", "losetup", "ip", "tc", "nameif", "telnet", "telnetd",
+    "fsck", "mkfs", "losetup", "ip", "nameif", "telnet", "telnetd",
     "httpd", "ftpd", "getopt", "watch", "less", "more", "md5sum", "sha256sum",
 ]
 
