@@ -193,16 +193,29 @@ stage_rootfs() {
 
 stage_kernel() {
     log "configuring and building the Linux kernel…"
-    require gcc make perl bc python3
+    require gcc make perl python3 flex bison
+    # bc comes from our pinned in-tree build (src/bc), not the PATH
+    [ -x "$SRC/bc/bin/bc" ] || die "bc not built yet: run scripts/build.sh toolchain"
     stage_musl
     stage_busybox
     stage_microwindows
     stage_os
     stage_rootfs
-    python3 "$ROOT/tools/make-config.py"
     (
         cd "$SRC/linux"
-        PATH="$SRC/bc/bin:$PATH" make -j"$JOBS" bzImage
+        PATH="$SRC/bc/bin:$PATH"
+        # Native Kconfig (not kconfiglib): Linux v6.12 Kconfig uses the `modules`
+        # keyword, which the last kconfiglib release cannot parse. The kernel's
+        # own `conf` handles it; it needs flex+bison (installed as build deps).
+        make ARCH=x86_64 x86_64_defconfig >/dev/null
+        ./scripts/kconfig/merge_config.sh -m .config \
+            "$ROOT/tools/config/override.config" >/dev/null
+        # embed the assembled rootfs as the initramfs
+        ./scripts/config --file .config \
+            --set-str INITRAMFS_SOURCE "$BLD/rootfs" \
+            --enable INITRAMFS_COMPRESSION_GZIP
+        make ARCH=x86_64 olddefconfig >/dev/null
+        make -j"$JOBS" bzImage
     )
     # collect the monolithic EFI-stub kernel
     mkdir -p "$BLD/out"

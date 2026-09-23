@@ -17,7 +17,7 @@ source inside this repository.
 | C library | musl `1.2.6` | static userspace, no glibc |
 | Core tools | BusyBox `1.36.1` | static, ash shell, ~75 applets |
 | GUI | Microwindows / Nano-X | Windows-style windowing on the Linux framebuffer, tiny window manager (nanowm), terminal, clock, calculator, demos |
-| Build tools | `bc` (gavinhoward), `musl-gcc`, `pycdlib`, `kconfiglib` | only what the build itself needs |
+| Build tools | `bc` (gavinhoward), `musl-gcc`, `pycdlib`, flex+bison | only what the build itself needs |
 
 Everything boots from an **embedded initramfs** built into the kernel, so a
 single static kernel image carries the entire OS. The root filesystem is
@@ -32,9 +32,10 @@ The build host for this project is intentionally minimal and network-filtered:
 - blocked: Debian/apt mirrors, `kernel.org` tarballs, Docker registries,
   `raw.githubusercontent.com`/`codeload` release assets, and most other hosts
 
-So every dependency is fetched with `git clone` from GitHub, and the kernel's
-normally flex+bison-built `conf` tool is replaced by `kconfiglib` (pure Python)
-in `tools/make-config.py`.
+So every dependency is fetched with `git clone` from GitHub, and the kernel is
+configured with its own `conf`/`olddefconfig` (flex+bison are required build
+deps; Linux 6.12 Kconfig uses the `modules` keyword, which the Python
+`kconfiglib` library cannot parse).
 
 ## Layout
 
@@ -48,8 +49,8 @@ os/                                from-scratch OmniOS source (init, libs, GUI)
   gui/                             desktop shell, window manager, protocol, client
   apps/                            terminal, files, calc, editor, sysinfo, about
   vendor/                          vendored public-domain stb_image + font8x8
-tools/make-config.py               kernel Kconfig resolution (replaces `conf`)
-tools/config/override.config       project kernel options
+tools/config/override.config       project kernel options (merged over defconfig)
+tools/make-rootfs.py               assembles build/rootfs (the OS itself)
 tools/make-rootfs.py               assembles build/rootfs (the OS itself)
 tools/make-iso.py                  assembles the bootable UEFI ISO from the kernel
 tools/make-fat.py                  pure-Python FAT image builder for the EFI System Partition
@@ -104,8 +105,8 @@ socket, receiving keyboard/mouse focus from the server.
 ## Build (in order)
 
 ```bash
-# 0. Python build deps (PyPI is reachable)
-python3 -m pip install --user --break-system-packages kconfiglib pycdlib
+# 0. Build deps: distro packages (flex, bison, bc, …) + Python pycdlib (PyPI)
+python3 -m pip install --user --break-system-packages pycdlib
 
 # 1. everything, in order:
 #    fetch -> toolchain -> musl -> busybox -> microwindows -> rootfs -> kernel -> iso
@@ -118,7 +119,7 @@ scripts/build.sh musl        # musl libc into build/sysroot
 scripts/build.sh userspace   # musl + busybox + microwindows
 scripts/build.sh os          # build the OmniOS core (init + desktop + apps)
 scripts/build.sh rootfs      # assemble build/rootfs via tools/make-rootfs.py
-scripts/build.sh kernel      # tools/make-config.py + bzImage (embeds the initramfs)
+scripts/build.sh kernel      # x86_64_defconfig + overrides + bzImage (initramfs)
 scripts/build.sh iso         # build/out/OmniOS-<version>-amd64.iso (UEFI)
 scripts/build.sh clean       # remove build outputs
 ```
