@@ -65,7 +65,9 @@ stage_toolchain() {
     require gcc make git python3
     [ -x "$SRC/bc/bin/bc" ] || {
         cd "$SRC/bc"
-        ./configure.sh -O2 -s
+        # bc-only, optimised, no NLS. (Recent bc changed `-s` from a bare
+        # strip toggle to `-s SETTING`; `-b/-N/-O` are stable across both.)
+        ./configure.sh -O2 -b -N
         make -j"$JOBS"
     }
     log "  bc ok: $SRC/bc/bin/bc"
