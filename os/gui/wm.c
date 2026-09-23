@@ -365,8 +365,12 @@ void omni_wm_paint(struct omni_wm *wm)
 {
     int i;
 
-    raster_gradient_v(&wm->screen, 0, 0, wm->screen.w, wm->screen.h,
-                      OMNI_COLOR_DESKTOP, omni_rgb(0x0a, 0x1e, 0x38));
+    /* desktop background: shell-provided wallpaper, else built-in gradient */
+    if (wm->draw_background)
+        wm->draw_background(wm);
+    else
+        raster_gradient_v(&wm->screen, 0, 0, wm->screen.w, wm->screen.h,
+                          OMNI_COLOR_DESKTOP, omni_rgb(0x0a, 0x1e, 0x38));
 
     for (i = wm->nwin - 1; i >= 0; i--) {
         struct omni_win *w = wm->order[i];
@@ -461,6 +465,8 @@ static void drop_client(struct omni_wm *wm, int ci)
     cl->fd = -1;
     cl->win = NULL;
     cl->hello = 0;
+    cl->rxlen = 0;
+    cl->rx[0] = '\0';
 }
 
 static int handle_line(struct omni_wm *wm, int ci, const char *line)
@@ -567,37 +573,53 @@ static int handle_line(struct omni_wm *wm, int ci, const char *line)
     return 0;
 }
 
-/* Dispatch one buffered protocol line from the client. Called repeatedly
- * for as long as more complete lines are already buffered. */
+/* Drain one client's socket into its per-client line buffer and dispatch
+ * every complete line. Partial lines survive across calls, so fragmented
+ * writes on the non-blocking socket are handled correctly.
+ * Returns 0 (ok) or -1 (client dropped). */
 int omni_wm_handle_client(struct omni_wm *wm, int ci)
 {
     struct omni_client *cl = &wm->clients[ci];
-    char buf[OMNI_PROTO_MAX_LINE];
+    char tmp[1024];
 
     if (cl->fd < 0)
         return -1;
 
     for (;;) {
-        char peek;
-        ssize_t rr;
+        ssize_t n = read(cl->fd, tmp, sizeof(tmp));
+        int i;
 
-        memset(buf, 0, sizeof(buf));
-        if (proto_recv(cl->fd, buf, sizeof(buf)) < 0) {
+        if (n < 0) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK)
+                break;
             drop_client(wm, ci);
             omni_wm_paint(wm);
             return -1;
         }
-        if (buf[0] == '\0')
-            break;
-        if (handle_line(wm, ci, buf) == 1) {
+        if (n == 0) {          /* EOF */
             drop_client(wm, ci);
             omni_wm_paint(wm);
             return -1;
         }
-        /* continue only if another full line is already buffered */
-        rr = recv(cl->fd, &peek, 1, MSG_PEEK | MSG_DONTWAIT);
-        if (rr <= 0)
-            break;
+
+        for (i = 0; i < n; i++) {
+            if (tmp[i] == '\n') {
+                cl->rx[cl->rxlen] = '\0';
+                cl->rxlen = 0;
+                if (handle_line(wm, ci, cl->rx) == 1) {
+                    drop_client(wm, ci);
+                    omni_wm_paint(wm);
+                    return -1;
+                }
+            } else if (cl->rxlen < OMNI_PROTO_MAX_LINE - 1) {
+                cl->rx[cl->rxlen++] = tmp[i];
+            } else {
+                /* overlong line: drop the misbehaving client */
+                drop_client(wm, ci);
+                omni_wm_paint(wm);
+                return -1;
+            }
+        }
     }
     return 0;
 }

@@ -44,11 +44,16 @@ struct omni_client {
     int    fd;                  /* connected socket, -1 = empty          */
     int    hello;               /* HELLO received                        */
     struct omni_win *win;       /* the client's window (NULL until OPEN) */
+    char   rx[OMNI_PROTO_MAX_LINE];  /* partial line receive buffer      */
+    int    rxlen;
 };
 
 struct omni_wm {
     struct raster screen;       /* desktop surface (framebuffer)         */
     int    listen_fd;           /* UNIX socket listener                  */
+    /* optional wallpaper hook: if set, omni_wm_paint() calls it to draw
+     * the desktop background instead of the built-in gradient.           */
+    void (*draw_background)(struct omni_wm *wm);
     struct omni_client clients[OMNI_WM_MAX_CLI];
 
     struct omni_win wins[OMNI_WM_MAX_WIN];

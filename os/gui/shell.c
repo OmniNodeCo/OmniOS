@@ -3,8 +3,12 @@
  *
  * The graphical desktop shell: gradient wallpaper with the OmniOS logo,
  * a Windows-style taskbar (Start button, window buttons, clock) and a
- * pop-up start menu. Owns the framebuffer, the window manager and the
- * input devices, and spawns bundled apps via their /usr/bin paths.
+ * pop-up start menu.
+ *
+ * It is the display server: it owns the framebuffer, runs the window
+ * manager (os/gui/wm.c) on a UNIX socket at /tmp/.omnios-wm, accepts
+ * application clients, routes keyboard/mouse input to them, and paints
+ * wallpaper + windows + taskbar each frame.
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -22,31 +26,48 @@
 #include "wm.h"
 
 /* ------------------------------------------------------------------ */
-/* pointer state (the desktop is the global mouse owner)               */
+/* global desktop state                                               */
 /* ------------------------------------------------------------------ */
 
-static int g_px, g_py;
-static struct omni_wm g_wm;
-static struct raster g_screen;
-static int g_mx, g_my;
+static struct omni_wm   g_wm;
+static struct raster    g_screen;
+static int g_px, g_py;              /* pointer (mouse) position           */
+static int g_mx, g_my;              /* start-menu top-left origin         */
+static int g_menu_open;             /* start menu visible                 */
 
-void omni_shell_warp(int dx, int dy)
+static const struct omni_menu_item g_menu[] = {
+    { "Terminal",     "/usr/bin/omnios-term" },
+    { "File Manager", "/usr/bin/omnios-files" },
+    { "Calculator",   "/usr/bin/omnios-calc" },
+    { "Text Editor",  "/usr/bin/omnios-edit" },
+    { "System Info",  "/usr/bin/omnios-sysinfo" },
+    { "About OmniOS", "/usr/bin/omnios-about" },
+};
+static const int g_menu_n = (int)(sizeof(g_menu) / sizeof(g_menu[0]));
+
+static const int TASKBAR_H = 30;
+
+/* ------------------------------------------------------------------ */
+/* pointer motion                                                     */
+/* ------------------------------------------------------------------ */
+
+static void omni_shell_warp(int dx, int dy)
 {
-    /* accumulate relative motion into the pointer */
-    if (dx > 63)   dx -= 128;  /* account for underflow in PS/2 bytes */
+    if (dx > 63)   dx -= 128;   /* PS/2 9-bit underflow */
     if (dx < -64)  dx += 128;
     if (dy > 63)   dy -= 128;
     if (dy < -64)  dy += 128;
 
-    /* sensitivity: raw counts -> pixels */
     g_px += dx;
     g_py += dy;
     if (g_px < 0) g_px = 0;
     if (g_py < 0) g_py = 0;
+    if (g_px >= g_screen.w) g_px = g_screen.w - 1;
+    if (g_py >= g_screen.h) g_py = g_screen.h - 1;
 }
 
 /* ------------------------------------------------------------------ */
-/* wallpaper + logo                                                    */
+/* wallpaper + logo                                                   */
 /* ------------------------------------------------------------------ */
 
 static void draw_logo(struct raster *r, int cx, int cy, int radius)
@@ -64,7 +85,6 @@ static void draw_logo(struct raster *r, int cx, int cy, int radius)
                             ? omni_rgb(0x7a, 0xc7, 0xff)
                             : omni_rgb(0x1b, 0x59, 0x98));
     }
-    /* glossy highlight */
     for (dy = -radius; dy < -radius / 2; dy++) {
         int w = 0;
         int rr = radius * radius;
@@ -79,16 +99,18 @@ static void draw_logo(struct raster *r, int cx, int cy, int radius)
     }
 }
 
-static void draw_wallpaper(struct raster *r)
+/* desktop background; invoked by omni_wm_paint() before any window is
+ * blitted, so windows always composite on top of the wallpaper. */
+static void shell_draw_background(struct omni_wm *wm)
 {
-    int w = r->w, h = r->h;
-    int cx = w / 2, cy = h / 2 - 20, rad = h / 5;
+    struct raster *r = &wm->screen;
+    int cx = r->w / 2, cy = r->h / 2 - 20, rad = r->h / 5;
     struct canvas c;
 
-    raster_gradient_v(r, 0, 0, w, h,
+    raster_gradient_v(r, 0, 0, r->w, r->h,
                       OMNI_COLOR_DESKTOP, omni_rgb(0x0a, 0x1e, 0x38));
 
-    if (rad > w / 4) rad = w / 4;
+    if (rad > r->w / 4) rad = r->w / 4;
     if (rad < 24) rad = 24;
     draw_logo(r, cx, cy, rad);
 
@@ -99,30 +121,26 @@ static void draw_wallpaper(struct raster *r)
 }
 
 /* ------------------------------------------------------------------ */
-/* taskbar                                                             */
+/* taskbar (always on top of windows)                                 */
 /* ------------------------------------------------------------------ */
-
-#if 0  /* start button + window strip now handled in draw_taskbar below */
-#endif
 
 static void draw_taskbar(struct omni_wm *wm, struct raster *r)
 {
-    int h = 30;
-    int y = r->h - h;
+    int y = r->h - TASKBAR_H;
     int x;
     struct canvas c;
 
-    raster_gradient_v(r, 0, y, r->w, h,
+    raster_gradient_v(r, 0, y, r->w, TASKBAR_H,
                       omni_rgb(0x2d, 0x7d, 0xd2), omni_rgb(0x14, 0x3c, 0x66));
     raster_hline(r, 0, r->w - 1, y, omni_rgb(0x4a, 0x9e, 0xe8));
 
     /* Start button */
-    raster_fill(r, 4, y + 4, 96, h - 8, omni_rgb(0x1a, 0x5a, 0x9e));
-    raster_rect(r, 4, y + 4, 96, h - 8, omni_rgb(0xff, 0xff, 0xff));
+    raster_fill(r, 4, y + 4, 96, TASKBAR_H - 8, omni_rgb(0x1a, 0x5a, 0x9e));
+    raster_rect(r, 4, y + 4, 96, TASKBAR_H - 8, omni_rgb(0xff, 0xff, 0xff));
     canvas_init(&c, r, omni_rgb(0xff, 0xff, 0xff), 0);
     canvas_text(&c, "Start", 4 + 26, y + 9);
 
-    /* window buttons */
+    /* window buttons, left -> right in stacking order */
     x = 112;
     {
         int i, nbtn = 0;
@@ -133,11 +151,11 @@ static void draw_taskbar(struct omni_wm *wm, struct raster *r)
                 bw = r->w - 120 - x;
             if (bw < 40)
                 break;
-            raster_fill(r, x, y + 4, bw, h - 8,
+            raster_fill(r, x, y + 4, bw, TASKBAR_H - 8,
                         w == wm->active
                             ? omni_rgb(0x3a, 0x8c, 0xe0)
                             : omni_rgb(0x24, 0x66, 0xa9));
-            raster_rect(r, x, y + 4, bw, h - 8, omni_rgb(0x10, 0x30, 0x52));
+            raster_rect(r, x, y + 4, bw, TASKBAR_H - 8, omni_rgb(0x10, 0x30, 0x52));
             canvas_init(&c, r, omni_rgb(0xff, 0xff, 0xff), 0);
             canvas_set_clip(&c, x + 4, y + 9, bw - 8, 8);
             canvas_text(&c, w->title, x + 4, y + 9);
@@ -155,7 +173,7 @@ static void draw_taskbar(struct omni_wm *wm, struct raster *r)
         strftime(tm, sizeof(tm), "%H:%M", &tmv);
         {
             int tw = ((int)strlen(tm)) * 8;
-            raster_fill(r, r->w - 64, y + 4, 56, h - 8, 0);
+            raster_fill(r, r->w - 64, y + 4, 56, TASKBAR_H - 8, 0);
             canvas_init(&c, r, omni_rgb(0xff, 0xff, 0xff), 0);
             canvas_text(&c, tm, r->w - 60 + (56 - tw) / 2 - 2, y + 9);
         }
@@ -163,19 +181,15 @@ static void draw_taskbar(struct omni_wm *wm, struct raster *r)
 }
 
 /* ------------------------------------------------------------------ */
-/* start menu                                                          */
+/* start menu                                                         */
 /* ------------------------------------------------------------------ */
 
-static void draw_menu(struct raster *r, int open, int x, int y, int w,
-                      const struct omni_menu_item *items, int n)
+static void draw_menu(struct raster *r, int x, int y, int w, int n)
 {
     struct canvas c;
     int row_h = 22;
     int h = (n + 1) * row_h + 8;
     int i;
-
-    if (!open)
-        return;
 
     raster_fill(r, x, y, w, h, omni_rgb(0xf0, 0xf0, 0xf0));
     raster_rect(r, x, y, w, h, omni_rgb(0x40, 0x40, 0x40));
@@ -186,23 +200,21 @@ static void draw_menu(struct raster *r, int open, int x, int y, int w,
         int my = y + 6 + (i + 1) * row_h;
         if (my >= y + h - 4)
             break;
-        canvas_text(&c, items[i].label, x + 12, my + row_h / 2 - 4);
+        canvas_text(&c, g_menu[i].label, x + 12, my + row_h / 2 - 4);
     }
 }
 
-static int menu_hit(int x, int y, int mx, int my, int mw,
-                    const struct omni_menu_item *items, int n, int *idx)
+static int menu_hit(int x, int y, int *idx)
 {
     int row_h = 22;
+    int mw = 200;
     int i;
 
-    (void)items;
-    (void)mw;
-    if (x < mx || y < my)
+    if (x < g_mx || y < g_my)
         return 0;
-    for (i = 0; i < n; i++) {
-        int ry = my + 6 + (i + 1) * row_h;
-        if (y >= ry && y < ry + row_h && x >= mx && x < mx + 200) {
+    for (i = 0; i < g_menu_n; i++) {
+        int ry = g_my + 6 + (i + 1) * row_h;
+        if (y >= ry && y < ry + row_h && x >= g_mx && x < g_mx + mw) {
             *idx = i;
             return 1;
         }
@@ -210,45 +222,83 @@ static int menu_hit(int x, int y, int mx, int my, int mw,
     return 0;
 }
 
+static void open_menu(void)
+{
+    int row_h = 22;
+    g_mx = 4;
+    g_my = g_screen.h - TASKBAR_H - (g_menu_n + 1) * row_h - 8;
+    if (g_my < 0)
+        g_my = 0;
+    g_menu_open = 1;
+}
+
 /* ------------------------------------------------------------------ */
-/* app launching                                                       */
+/* app launching                                                      */
 /* ------------------------------------------------------------------ */
 
 static void launch(const struct omni_menu_item *item)
 {
     pid_t pid = fork();
     if (pid == 0) {
-        /* child: detach and exec; the shell keeps running */
         execl(item->path, item->path, (char *)NULL);
         _exit(127);
     }
-    /* reap asynchronously to avoid zombies */
     while (waitpid(-1, NULL, WNOHANG) > 0)
         ;
 }
 
 /* ------------------------------------------------------------------ */
-/* external app windows                                                */
+/* input -> shell / server routing                                    */
 /* ------------------------------------------------------------------ */
 
-static struct omni_win *new_app_window(const char *title, int x, int y,
-                                       int w, int h)
+/* handle a pointer click: start menu, taskbar buttons, or window chrome */
+static int shell_button(int x, int y)
 {
-    return omni_wm_add(&g_wm, title, x, y, w, h);
+    /* open start menu routes clicks to entries */
+    if (g_menu_open) {
+        int idx;
+        if (menu_hit(x, y, &idx))
+            launch(&g_menu[idx]);
+        g_menu_open = 0;
+        return 1;
+    }
+
+    /* Start button */
+    if (y >= g_screen.h - TASKBAR_H && x >= 4 && x < 100) {
+        open_menu();
+        return 1;
+    }
+
+    /* taskbar window buttons: focus/restore, or minimize the active one */
+    if (y >= g_screen.h - TASKBAR_H) {
+        int i, nbtn = 0, bx = 112;
+        for (i = 0; i < g_wm.nwin && nbtn < OMNI_WM_MAX_WIN; i++) {
+            struct omni_win *w = g_wm.order[g_wm.nwin - 1 - i];
+            int bw = 128;
+            if (bx + bw > g_screen.w - 120) bw = g_screen.w - 120 - bx;
+            if (bw < 40) break;
+            if (x >= bx && x < bx + bw) {
+                if (w == g_wm.active && w->y < g_screen.h) {
+                    /* minimize: slide below the visible desktop */
+                    w->y = g_screen.h + 4;
+                    g_wm.active = NULL;
+                } else {
+                    if (w->y >= g_screen.h)
+                        w->y = 60;   /* restore */
+                    omni_wm_raise(&g_wm, w);
+                }
+                return 1;
+            }
+            nbtn++;
+            bx += bw + 6;
+        }
+    }
+    return 0;
 }
-
-/* The shell manages its own welcome window plus whatever app windows the
- * user opens. External apps (omnios-*) are separate processes today; the
- * window manager API is also exported so they can talk over a future pipe.
- */
-
-/* ------------------------------------------------------------------ */
-/* main loop                                                           */
-/* ------------------------------------------------------------------ */
 
 void omni_shell_open_initial_windows(void)
 {
-    struct omni_win *w = new_app_window("Welcome to OmniOS", 60, 60, 480, 280);
+    struct omni_win *w = omni_wm_add(&g_wm, "Welcome to OmniOS", 60, 60, 480, 280);
     if (w) {
         struct raster *s = &w->surface;
         struct canvas c;
@@ -263,95 +313,18 @@ void omni_shell_open_initial_windows(void)
     }
 }
 
-void omni_shell_key(int code, char ch)
-{
-    (void)code;
-    (void)ch;
-}
-
-static const struct omni_menu_item g_menu[] = {
-    { "Terminal",     "/usr/bin/omnios-term" },
-    { "File Manager", "/usr/bin/omnios-files" },
-    { "Calculator",   "/usr/bin/omnios-calc" },
-    { "Text Editor",  "/usr/bin/omnios-edit" },
-    { "System Info",  "/usr/bin/omnios-sysinfo" },
-    { "About OmniOS", "/usr/bin/omnios-about" },
-};
-static const int g_menu_n = (int)(sizeof(g_menu) / sizeof(g_menu[0]));
-
-static int g_menu_open = 0;
-
-static void set_menu_open(void)
-{
-    int row_h = 22;
-    g_mx = 4;
-    g_my = g_screen.h - 26                                      /* taskbar   */
-           - (g_menu_n + 1) * row_h - 8;                        /* menu box  */
-    g_menu_open = 1;
-}
-
-static int omni_button_event(int btn, int pressed, int x, int y)
-{
-    if (btn != 1 || !pressed)
-        return 0;
-
-    /* start menu open: route clicks inside it */
-    if (g_menu_open) {
-        int idx;
-        if (menu_hit(x, y, g_mx, g_my, 200, g_menu, g_menu_n, &idx)) {
-            launch(&g_menu[idx]);
-        }
-        g_menu_open = 0;
-        return 1;
-    }
-
-    /* Start button (4, screen_h-26, 96, 22) */
-    if (g_screen.h > 26 && x >= 4 && x < 100 && y >= g_screen.h - 26) {
-        set_menu_open();
-        return 1;
-    }
-
-    /* taskbar window buttons */
-    {
-        int i, nbtn = 0, bx = 112;
-        for (i = 0; i < g_wm.nwin && nbtn < OMNI_WM_MAX_WIN; i++) {
-            struct omni_win *w = g_wm.order[g_wm.nwin - 1 - i];
-            int bw = 128;
-            if (bx + bw > g_screen.w - 120) bw = g_screen.w - 120 - bx;
-            if (bw < 40) break;
-            if (x >= bx && x < bx + bw && y >= g_screen.h - 26) {
-                if (w->y >= g_screen.h) {
-                    /* restore a minimized window */
-                    w->y = 60;
-                }
-                omni_wm_raise(&g_wm, w);
-                return 1;
-            }
-            nbtn++;
-            bx += bw + 6;
-        }
-    }
-
-    return 0;
-}
-
-static int omni_button_fwd(int btn, int pressed, int x, int y)
-{
-    if (pressed && btn != 1)
-        return 0;
-
-    /* window-manager-level handling (move/resize/close/raise) */
-    omni_wm_button(&g_wm, x, y, btn, pressed);
-    return 0;
-}
+/* ------------------------------------------------------------------ */
+/* main loop                                                          */
+/* ------------------------------------------------------------------ */
 
 void omni_shell_run(void)
 {
     struct osfb fb;
     struct omni_devs devs;
-    struct pollfd pfds[16];
-    int nfds;
+    struct pollfd pfds[1 + 8 + 1 + 1];   /* wm listener + ev* + mice + tty */
+    int nfds_dev, nfds;
     int clock_last = -1;
+    int lfdidx = 0;
 
     if (osfb_wait("/dev/fb0", 50, 200) < 0)
         omni_console_puts("desktop: no framebuffer\n");
@@ -361,53 +334,78 @@ void omni_shell_run(void)
     }
     omni_console_puts("desktop: framebuffer ready\n");
 
-    /* build the raster view of the mapped framebuffer */
     g_screen = fb_raster(&fb);
 
     omni_wm_init(&g_wm, &g_screen);
+    g_wm.draw_background = shell_draw_background;
+
+    if (omni_wm_start(&g_wm) != 0)
+        omni_console_puts("desktop: WARN display socket not started\n");
+
     omni_devs_open(&devs);
-    nfds = omni_devs_nfds(&devs);
-    omni_devs_fill(&devs, pfds);
+    nfds_dev = omni_devs_nfds(&devs);
+    omni_devs_fill(&devs, &pfds[1]);
+
+    /* index 0 = display socket listener */
+    pfds[0].fd = omni_wm_fd(&g_wm);
+    pfds[0].events = POLLIN;
+    pfds[0].revents = 0;
+    nfds = 1 + nfds_dev;
 
     omni_shell_open_initial_windows();
     g_px = g_screen.w / 2;
     g_py = g_screen.h / 2;
-
-    omni_wm_paint(&g_wm);
-    draw_wallpaper(&g_screen);
-    draw_taskbar(&g_wm, &g_screen);
 
     for (;;) {
         time_t t = time(NULL);
         struct tm tmv;
         int redraw = 0;
         struct omni_input e;
+        int ci;
 
-        poll(pfds, (nfds_t)nfds, 120);
+        if (poll(pfds, (nfds_t)nfds, 120) < 0)
+            continue;
 
-        /* drain readable devices */
+        /* new client connections */
+        if (pfds[lfdidx].revents & POLLIN)
+            omni_wm_accept(&g_wm);
+
+        /* dispatch client protocol (non-blocking, one pass each) */
+        for (ci = 0; ci < OMNI_WM_MAX_CLI; ci++) {
+            if (g_wm.clients[ci].fd >= 0) {
+                struct pollfd pfd;
+                pfd.fd = g_wm.clients[ci].fd;
+                pfd.events = POLLIN;
+                pfd.revents = 0;
+                if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN))
+                    omni_wm_handle_client(&g_wm, ci);
+            }
+        }
+
+        /* input devices */
         {
             int idx;
-            for (idx = 0; idx < nfds; idx++) {
-                if (pfds[idx].revents & POLLIN)
+            for (idx = 0; idx < nfds_dev; idx++) {
+                if (pfds[1 + idx].revents & POLLIN)
                     omni_devs_drain(&devs, idx);
             }
         }
 
         while (omni_input_next(&e) == 0) {
-            if (e.type == 2) {
+            if (e.type == 2) {                       /* mouse motion */
                 omni_shell_warp(e.dx, e.dy);
-                if (g_px >= g_screen.w) g_px = g_screen.w - 1;
-                if (g_py >= g_screen.h) g_py = g_screen.h - 1;
                 if (omni_wm_motion(&g_wm, g_px, g_py) == 1)
                     redraw = 1;
-            } else if (e.type == 3) {
-                omni_button_fwd(e.key, e.pressed, g_px, g_py);
-                if (omni_button_event(e.key, e.pressed, g_px, g_py))
+            } else if (e.type == 3) {                 /* button */
+                if (e.pressed && shell_button(g_px, g_py))
                     redraw = 1;
-            } else if (e.type == 1 && e.pressed) {
-                omni_shell_key(e.key, e.text);
-                redraw = 1;
+                else
+                    omni_wm_button(&g_wm, g_px, g_py, e.key, e.pressed);
+                if (e.pressed)
+                    redraw = 1;
+            } else if (e.type == 1) {                 /* key */
+                if (e.pressed && g_wm.active)
+                    omni_wm_key(&g_wm, e.key, e.pressed, e.text);
             }
         }
 
@@ -418,11 +416,10 @@ void omni_shell_run(void)
         }
 
         if (redraw) {
-            omni_wm_paint(&g_wm);
-            draw_wallpaper(&g_screen);
-            draw_taskbar(&g_wm, &g_screen);
-            draw_menu(&g_screen, g_menu_open, g_mx, g_my, 200,
-                      g_menu, g_menu_n);
+            omni_wm_paint(&g_wm);            /* wallpaper + windows */
+            draw_taskbar(&g_wm, &g_screen);  /* always on top       */
+            if (g_menu_open)
+                draw_menu(&g_screen, g_mx, g_my, 200, g_menu_n);
         }
     }
 

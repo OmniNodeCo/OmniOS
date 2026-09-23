@@ -115,16 +115,6 @@ int omni_client_window(struct omni_client_conn *c, const char *title,
     }
 }
 
-static int send_cmd(const struct omni_client_conn *c, const char *verb,
-                    int numc, const long *num)
-{
-    char line[OMNI_PROTO_MAX_LINE];
-    if (c->fd < 0 || c->win <= 0)
-        return -1;
-    proto_build(line, sizeof(line), verb, numc, num);
-    return proto_send(c->fd, line);
-}
-
 int omni_client_clear(struct omni_client_conn *c, uint32_t rgb)
 {
     char line[OMNI_PROTO_MAX_LINE];
