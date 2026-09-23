@@ -224,11 +224,16 @@ stage_kernel() {
 }
 
 stage_iso() {
-    log "assembling bootable ISO (UEFI)…"
+    log "assembling bootable hybrid ISO (BIOS + UEFI)…"
     require python3
-    python3 -c 'import pycdlib' 2>/dev/null \
-        || die "pycdlib not installed: python3 -m pip install pycdlib"
     [ -f "$BLD/out/omnios-bzImage-$VERSION" ] || stage_kernel
+    if ! had xorriso; then
+        # pure-Python fallback: UEFI-only ISO (no BIOS boot catalogue)
+        python3 -c 'import pycdlib' 2>/dev/null \
+            || die "pycdlib not installed: python3 -m pip install pycdlib"
+        warn "xorriso/isolinux not found — ISO will be UEFI-only; BIOS "
+        warn "firmware will still report 'Operating system not found'."
+    fi
     python3 "$ROOT/tools/make-iso.py"
     log "  ISO: $BLD/out/OmniOS-$VERSION-amd64.iso"
     ls -la "$BLD/out"

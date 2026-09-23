@@ -51,8 +51,7 @@ os/                                from-scratch OmniOS source (init, libs, GUI)
   vendor/                          vendored public-domain stb_image + font8x8
 tools/config/override.config       project kernel options (merged over defconfig)
 tools/make-rootfs.py               assembles build/rootfs (the OS itself)
-tools/make-rootfs.py               assembles build/rootfs (the OS itself)
-tools/make-iso.py                  assembles the bootable UEFI ISO from the kernel
+tools/make-iso.py                  assembles the hybrid BIOS+UEFI ISO + .vmx
 tools/make-fat.py                  pure-Python FAT image builder for the EFI System Partition
 tools/config/busybox.config        BusyBox build config
 tools/config/microwindows.config   Nano-X framebuffer build config
@@ -120,21 +119,40 @@ scripts/build.sh userspace   # musl + busybox + microwindows
 scripts/build.sh os          # build the OmniOS core (init + desktop + apps)
 scripts/build.sh rootfs      # assemble build/rootfs via tools/make-rootfs.py
 scripts/build.sh kernel      # x86_64_defconfig + overrides + bzImage (initramfs)
-scripts/build.sh iso         # build/out/OmniOS-<version>-amd64.iso (UEFI)
+scripts/build.sh iso         # build/out/OmniOS-<version>-amd64.iso (BIOS+UEFI)
 scripts/build.sh clean       # remove build outputs
 ```
 
 The ready-to-boot artifacts land in `build/out/`:
 
-- `omnios-bzImage-<version>` — the static kernel, itself a UEFI bootloader
-- `OmniOS-<version>-amd64.iso` + `.sha256` — the bootable UEFI ISO
+- `omnios-bzImage-<version>` — the static kernel; it is its own bootloader
+  (EFI stub for UEFI, real-mode setup for BIOS).
+- `OmniOS-<version>-amd64.iso` + `.sha256` — the bootable **hybrid ISO**
+  (BIOS via ISOLINUX, UEFI via the EFI stub).
+- `OmniOS-<version>-amd64.vmx` — a ready-to-run VMware machine definition
+  that boots the ISO (see below).
+
+### Booting
+
+- **UEFI firmware**: the kernel is executed directly from
+  `/EFI/BOOT/BOOTX64.EFI` (no bootloader).
+- **BIOS firmware** (e.g. VMware "BIOS" mode): ISOLINUX loads
+  `/boot/omnios-bzImage` per the Linux boot protocol. The
+  `"Operating system not found"` message appears only when the ISO lacks the
+  ISOLINUX catalogue — i.e. when it was built without `xorriso`/`isolinux`.
+- **VMware**: drop `OmniOS-<version>-amd64.iso` and the `.vmx` in the same
+  folder and open the `.vmx`. It boots with UEFI firmware and logs the serial
+  console to `omnios-serial.log`; set `firmware = "bios"` to boot legacy.
+- **USB stick**: the CI-built ISO is hybrid, so
+  `dd if=OmniOS-<version>-amd64.iso of=/dev/sdX bs=16M oflag=direct
+  status=progress` yields a directly bootable drive on both firmware types.
 
 The ISO is produced two ways, chosen automatically:
 
-- **`xorriso` + `mtools`** when available (the CI path) — builds a proper
-  El Torito "*-eltorito-alt-boot -e efi.img*" image.
-- **pure Python** otherwise (`pycdlib` + `tools/make-fat.py`) — so the ISO can
-  still be produced on a minimal host with no ISO tooling beyond Python.
+- **`xorriso` + `mtools` + `isolinux`** when available (the CI path) — builds
+  a proper hybrid BIOS+UEFI El Torito image with a BIOS boot catalogue.
+- **pure Python** otherwise (`pycdlib` + `tools/make-fat.py`) — a
+  **UEFI-only** ISO on a minimal host with no ISO tooling beyond Python.
 
 `tools/make-fat.py` builds a small FAT16 "superfloppy" EFI System Partition
 (`/EFI/BOOT/BOOTX64.EFI`) without requiring `dosfstools`/`mtools`.
@@ -155,11 +173,12 @@ Three minimal, justified edits (see `patches/kernel-omnios.patch`):
 
 ## Status
 
-- kernel: configures and compiles to a final linking stage (in progress)
-- musl, BusyBox (static), Nano-X (static) all build successfully
+- kernel: configures and compiles (native `olddefconfig` + flex/bison; the
+  in-tree `bc` build is pinned at 7.1.0)
+- musl, BusyBox (static), Nano-X (static) and the `os/` core all build
 - root filesystem assembles completely
-- the ISO/EFI tooling is written and verified to produce a valid UEFI El Torito image
+- ISO tooling produces a hybrid BIOS+UEFI image (CI) plus a VMware `.vmx`;
+  a UEFI-only fallback exists on hosts without xorriso/isolinux
 
-The next milestone is finishing the kernel `bzImage` link and booting the
-resulting `OmniOS-<version>-amd64.iso`. See the build notes above for the
-exact steps.
+Next: boot `OmniOS-<version>-amd64.iso` in VMware (UEFI, via the bundled
+`.vmx`) and verify the desktop shell starts on the framebuffer.

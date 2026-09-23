@@ -30,8 +30,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential bc cpio gzip perl python3 python3-pip \
-            flex bison mtools xorriso xz-utils zstd git ca-certificates \
-            libc6-dev linux-libc-dev
+            flex bison mtools xorriso isolinux xz-utils zstd git \
+            ca-certificates libc6-dev linux-libc-dev
           python3 -m pip install --user --break-system-packages pycdlib
 
       - name: Fetch upstream sources
@@ -58,6 +58,7 @@ jobs:
           path: |
             build/out/*.iso
             build/out/*.iso.sha256
+            build/out/*.vmx
             build/out/omnios-bzImage-*
           retention-days: 30
 
