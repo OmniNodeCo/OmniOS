@@ -36,7 +36,7 @@ stage_fetch() {
     log "fetching upstream sources (git)…"
     mkdir -p "$SRC"
     clone() { # name url [ref]
-        local dst="$SRC/$1" ref="$3" cur
+        local dst="$SRC/$1" ref="${3:-}" cur
         if [ -d "$dst/.git" ]; then
             cur="$(git -C "$dst" describe --tags --exact-match 2>/dev/null || true)"
             if [ -n "$ref" ] && [ "$cur" != "$ref" ]; then
