@@ -2,34 +2,201 @@
 """
 OmniOS root filesystem assembler.
 
-Assembles the complete runtime filesystem of the OmniOS live system from the
-artifacts built by the other `tools/` stages, into OUT_DIR (default
-build/rootfs). The result is consumed by the kernel's initramfs generation
-(CONFIG_INITRAMFS_SOURCE=.../build/rootfs), so it IS the installed OS: kernel,
-musl libc userspace, BusyBox, and the Nano-X / Microwindows GUI.
+Assembles the complete runtime filesystem of the OmniOS system from the
+artifacts produced by the other build stages, into ROOTFS_OUT
+(default build/rootfs). This tree is the OS itself: it is embedded into the
+kernel as the initramfs via CONFIG_INITRAMFS_SOURCE, so everything below `/`
+is authored here.
 
-Generates:
-  /init, /etc/inittab, /etc/passwd, /etc/group, /etc/profile
-  /etc/omnios-release            identity
-  /etc/fonts/...                 Microwindows fonts
-  /usr/bin, /usr/share, /dev entries, /tmp, /var/log, /proc, /sys, /mnt
-  the GUI session launcher (/usr/bin/omnios-desktop) and its shell
-  plus the script /usr/bin/nanowm that proxies the built-in window manager
+Layout produced:
+    /init                    first process: mount, seed /dev, exec init
+    /etc/inittab             BusyBox init (getty on tty1..2, ttyS0)
+    /etc/init.d/rcS          sysinit hook (mdev, hostname, motd, DM)
+    /etc/passwd, /etc/group
+    /etc/profile             interactive ash environment
+    /etc/omnios-release      identity
+    /usr/bin/omnios-desktop  launches the graphical desktop (nano-X + nanowm)
+    /bin/*                   BusyBox + applet symlinks
+    /usr/bin/nano-X ...      the Nano-X GUI binaries
+    /etc/fonts/*             built-in BDF fonts for the GUI
+
+Everything is deterministic and never requires superuser privileges.
 """
 import os
 import shutil
-import stat as statmod
 import sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 OUT = os.path.abspath(os.environ.get("ROOTFS_OUT", os.path.join(REPO, "build", "rootfs")))
 VERSION = open(os.path.join(REPO, "version.txt")).read().strip()
 
-MW = os.path.join(REPO, "src", "microwindows", "src")
-BB = os.path.join(REPO, "src", "busybox")
+# Where the per-stage builders put their install trees.
+MW_BIN = os.path.join(REPO, "build", "install", "microwindows", "bin")
+MW_FONTS = os.path.join(REPO, "build", "install", "microwindows", "fonts")
+BB = os.path.join(REPO, "build", "install", "busybox")
+
+
+# ---- static file contents ------------------------------------------------
+_INIT = """\
+#!/bin/sh
+# OmniOS /init — the very first userspace process (ash, BusyBox).
+export PATH=/usr/bin:/bin:/sbin:/usr/sbin
+
+/bin/mount -t proc     proc     /proc
+/bin/mount -t sysfs    sysfs    /sys
+/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null \\
+    || /bin/mount -t tmpfs tmpfs /dev
+mkdir -p /dev/pts /dev/shm /dev/input
+/bin/mount -t devpts devpts /dev/pts 2>/dev/null
+/bin/mount -t tmpfs tmpfs /tmp
+/bin/mkdir -p /run /var/log
+
+# Device nodes that mdev may not create before init runs.
+/bin/mknod /dev/console c 5 1 2>/dev/null
+/bin/mknod /dev/null    c 1 3 2>/dev/null
+/bin/mknod /dev/zero    c 1 5 2>/dev/null
+/bin/mknod /dev/tty     c 5 0 2>/dev/null
+/bin/mknod /dev/tty0    c 4 0 2>/dev/null
+/bin/mknod /dev/tty1    c 4 1 2>/dev/null
+/bin/mknod /dev/tty2    c 4 2 2>/dev/null
+/bin/mknod /dev/ttyS0   c 4 64 2>/dev/null
+
+if [ -e /proc/sys/kernel/hotplug ]; then
+    echo /sbin/mdev > /proc/sys/kernel/hotplug 2>/dev/null
+fi
+/bin/mdev -s 2>/dev/null || true
+
+echo "OmniOS ${VERSION} — booting."
+exec /sbin/init
+""".replace("${VERSION}", VERSION)
+
+_INITTAB = """\
+# OmniOS /etc/inittab — BusyBox init
+::sysinit:/etc/init.d/rcS
+::respawn:-/bin/login
+tty1::respawn:/sbin/getty -L tty1 0 vt100
+tty2::respawn:/sbin/getty -L tty2 0 vt100
+ttyS0::respawn:/sbin/getty -L ttyS0 115200 vt100
+::restart:/sbin/init
+::ctrlaltdel:/sbin/reboot
+::shutdown:/bin/umount -a -r
+::shutdown:/bin/swapoff -a
+"""
+
+_RCS = """\
+#!/bin/sh
+# OmniOS /etc/init.d/rcS — sysinit for BusyBox init
+export PATH=/usr/bin:/bin:/sbin:/usr/sbin
+
+/bin/hostname omnios
+/bin/mount -o remount,rw / 2>/dev/null || true
+/bin/mount -a 2>/dev/null || true
+
+if [ -x /sbin/mdev ]; then
+    /sbin/mdev -s
+fi
+
+/bin/cat /etc/motd > /dev/console 2>/dev/null
+
+# A serial console gives a rescue shell even when no display is attached.
+if [ -c /dev/ttyS0 ]; then
+    echo "OmniOS: serial console available." > /dev/ttyS0 2>/dev/null
+fi
+
+# Bring up the graphical desktop if we are on the active console.
+if [ -x /usr/bin/omnios-desktop ]; then
+    /usr/bin/omnios-desktop &
+fi
+exit 0
+"""
+
+_DESKTOP = """\
+#!/bin/sh
+# OmniOS graphical desktop session.
+#
+# nano-X is the windowing server: it drives the framebuffer and reads the
+# keyboard (/dev/tty) and mouse (/dev/input/mice) directly. nawm is its
+# built-in window manager. Applications connect over the UNIX socket
+# (DISPLAY=:0) and are drawn in windows, desktop style.
+export PATH=/usr/bin:/bin:/sbin:/usr/sbin
+export DISPLAY=:0
+
+# Wait briefly for simpledrm to register /dev/fb0 (BIOS VESA or UEFI GOP).
+i=0
+while [ ! -e /dev/fb0 ] && [ "$i" -lt 50 ]; do
+    sleep 0.1 2>/dev/null || sleep 1
+    i=$((i + 1))
+done
+
+if [ -e /dev/fb0 ]; then
+    echo "OmniOS: framebuffer detected, starting the desktop."
+    /usr/bin/nano-X -p &
+    NANOX_PID=$!
+    trap 'kill $NANOX_PID 2>/dev/null' INT TERM EXIT
+    # wait for the server socket before launching clients
+    i=0
+    while [ ! -S /tmp/.nano-X ] && [ "$i" -lt 50 ]; do
+        sleep 0.1 2>/dev/null || sleep 1
+        i=$((i + 1))
+    done
+    /usr/bin/nxterm -T "OmniOS Terminal" /bin/sh &
+    /usr/bin/nxclock &
+    /usr/bin/nxcalc &
+    wait $NANOX_PID
+else
+    echo "OmniOS: no framebuffer found — running text console only."
+    # keep a shell on the console as a fallback
+    exec /bin/sh
+fi
+"""
+
+_PROFILE = """\
+export PATH=/usr/bin:/bin:/sbin:/usr/sbin
+export HOME=/root
+export PS1='omnios:\\w\\$ '
+export TERM=vt100
+export DISPLAY=:0
+export LANG=C.UTF-8
+ulimit -c 0 2>/dev/null || true
+alias ll='ls -la'
+alias ls='ls --color=never'
+
+echo "OmniOS ${VERSION} — lightweight OS (Linux + musl + BusyBox + Nano-X)."
+echo "Type 'omnios-desktop' to (re)start the graphical desktop."
+""".replace("${VERSION}", VERSION)
+
+_MOTD = """\
+\\033[1;36m
+       OmniOS ${VERSION} — a lightweight OS built from source
+         kernel: Linux (static, x86_64)   libc: musl
+         shell: ash (BusyBox)             GUI: Nano-X / Microwindows
+\\033[0m
+ Auto-login friendly; run `omnios-desktop` for the desktop,
+ or multi-user with `login`.
+""".replace("${VERSION}", VERSION)
+
+_PASSWD = """\
+root:x:0:0:root:/root:/bin/sh
+omnios:x:1000:1000:OmniOS user:/home/omnios:/bin/sh
+"""
+
+_GROUP = """\
+root:x:0:
+tty:x:5:
+dialout:x:20:
+audio:x:29:
+video:x:44:
+omnios:x:1000:
+"""
 
 
 def main():
+    # ---- collection of built binaries ------------------------------------
+    bb = os.path.join(BB, "busybox")
+    if not os.path.exists(bb):
+        print("make-rootfs: WARN: %s not built yet (build stage)." % bb,
+              file=sys.stderr)
+
     if os.path.exists(OUT):
         shutil.rmtree(OUT)
     os.makedirs(OUT)
@@ -37,181 +204,96 @@ def main():
     # ---- directory skeleton ------------------------------------------------
     for d in ("bin", "sbin", "usr/bin", "usr/sbin", "usr/lib", "usr/share",
               "etc", "etc/init.d", "etc/fonts", "dev", "proc", "sys", "tmp",
-              "var", "var/log", "var/run", "mnt", "root", "home"):
+              "run", "var", "var/log", "var/run", "mnt", "root", "home/omnios"):
         os.makedirs(os.path.join(OUT, d), exist_ok=True)
 
-    # ---- dynamically-linked userspace gets a self-contained musl -----------
-    # (static-linked BusyBox and Nano-X still get /lib/ld-musl for running any
-    # eventually-dynamic binaries on the system)
-    os.makedirs(os.path.join(OUT, "lib"), exist_ok=True)
-
-    # ---- BusyBox ------------------------------------------------------------
-    for tool in ("busybox",):
-        shutil.copy(os.path.join(BB, tool), os.path.join(OUT, "bin", tool))
-    os.chmod(os.path.join(OUT, "bin", "busybox"), 0o755)
-    # create the applet symlinks a real system would have (ash first so
-    # /bin/sh resolves)
-    applets = ["sh", "ash", "mount", "umount", "cat", "ls", "cp", "mv", "rm",
-               "mkdir", "rmdir", "echo", "grep", "sed", "awk", "vi", "ps",
-               "top", "kill", "killall", "sleep", "date", "hostname", "init",
-               "login", "getty", "su", "ifconfig", "route", "ping", "sync",
-               "halt", "reboot", "poweroff", "dmesg", "mdev", "blkid",
-               "mkfs.ext2", "mkfs.vfat", "swapon", "swapoff", "wget", "nc",
-               "id", "whoami", "clear", "head", "tail", "wc", "sort", "cut",
-               "tr", "uniq", "find", "xargs", "ln", "chmod", "chown", "tar",
-               "gzip", "uname", "df", "du", "free", "uptime", "setterm",
-               "stty", "tty", "pwd", "true", "false", "test", "yes", "printf"]
-    for a in applets:
-        dst = os.path.join(OUT, "bin", a)
-        if not os.path.lexists(dst):
-            os.symlink("busybox", dst)
-    os.symlink("bin/sh", os.path.join(OUT, "sh")) if False else None
+    # ---- BusyBox and applet symlinks --------------------------------------
+    if os.path.exists(bb):
+        shutil.copy(bb, os.path.join(OUT, "bin", "busybox"))
+        os.chmod(os.path.join(OUT, "bin", "busybox"), 0o755)
+        for a in _APPLETS:
+            dst = os.path.join(OUT, "bin", a)
+            if not os.path.lexists(dst):
+                os.symlink("busybox", dst)
+        # /sbin and /usr/bin aliases for programs scripts and mdev expect
+        for a in ("init", "getty", "login", "mdev", "halt", "reboot",
+                  "poweroff", "swapoff", "swapon", "blkid"):
+            s = os.path.join(OUT, "sbin", a)
+            if not os.path.lexists(s):
+                os.symlink("/bin/busybox", s)
+    else:
+        print("make-rootfs: skipping BusyBox (not built).", file=sys.stderr)
 
     # ---- Nano-X / Microwindows GUI -----------------------------------------
-    gui_bins = ("nano-X", "nanowm", "nxclock", "nxterm", "nxcalc", "nxview",
-                "mwtris", "mwsci")
-    for b in ("nano-X", "nxclock", "nxterm", "nxcalc", "nxview", "nxev",
-              "nxkbd", "nxlsclients", "nxroach", "nxtetris", "mwhello"):
-        src = os.path.join(MW, "bin", b)
-        if os.path.exists(src):
-            shutil.copy(src, os.path.join(OUT, "usr", "bin", b))
+    for b in ("nano-X", "nanowm", "nxterm", "nxclock", "nxcalc", "nxview",
+              "nxev", "nxkbd", "nxlsclients", "nxroach", "nxtetris",
+              "mwhello", "mwin", "mwsci"):
+        s = os.path.join(MW_BIN, b)
+        if os.path.exists(s):
+            shutil.copy(s, os.path.join(OUT, "usr", "bin", b))
             os.chmod(os.path.join(OUT, "usr", "bin", b), 0o755)
+    # fonts
+    if os.path.isdir(MW_FONTS):
+        for f in sorted(os.listdir(MW_FONTS)):
+            shutil.copy(os.path.join(MW_FONTS, f),
+                        os.path.join(OUT, "etc", "fonts", f))
 
-    # ---- fonts -------------------------------------------------------------
-    for f in os.listdir(os.path.join(MW, "fonts", "bdf")):
-        shutil.copy(os.path.join(MW, "fonts", "bdf", f),
-                    os.path.join(OUT, "etc", "fonts", f))
-
-    # ---- device nodes ------------------------------------------------------
-    _mk(OUT, "dev")
-
-    # ---- /init (simple, deterministic, no systemd) -------------------------
-    _write(OUT, "init", _INIT_SCRIPT)
-    os.chmod(os.path.join(OUT, "init"), 0o755)
-
-    # ---- /etc files ---------------------------------------------------------
-    _write(OUT, "etc/inittab", _INITTAB)
-    _write(OUT, "etc/passwd", "root:x:0:0:root:/root:/bin/sh\nomnios:x:1000:1000:OmniOS user:/home/omnios:/bin/sh\n")
-    _write(OUT, "etc/group", "root:x:0:\nomnios:x:1000:\n")
-    _write(OUT, "etc/profile", _PROFILE)
-    _write(OUT, "etc/omnios-release", "OmniOS %s (from-source lightweight OS)\n" % VERSION)
-    _write(OUT, "etc/hostname", "omnios\n")
-    _write(OUT, "etc/motd", _MOTD)
-    _write(OUT, "etc/issue", _MOTD)
-    # the window-manager shim and GUI launcher
-    _write(OUT, "usr/bin/nanowm", "#!/bin/sh\n# OmniOS: window manager runs inside the nano-X server (built-in nanowm)\nexec /bin/sleep infinity\n")
-    os.chmod(os.path.join(OUT, "usr", "bin", "nanowm"), 0o755)
-    _write(OUT, "usr/bin/omnios-desktop", _DESKTOP_LAUNCHER)
-    os.chmod(os.path.join(OUT, "usr", "bin", "omnios-desktop"), 0o755)
-
-    # the GUI apps that need a thermal/fun start script
-    _write(OUT, "etc/init.d/omnios-gui", _GUI_INIT_SCRIPT)
-    os.chmod(os.path.join(OUT, "etc", "init.d", "omnios-gui"), 0o755)
+    # ---- /init and /etc ----------------------------------------------------
+    w("init", _INIT, 0o755)
+    w("etc/inittab", _INITTAB)
+    w("etc/init.d/rcS", _RCS, 0o755)
+    w("etc/profile", _PROFILE)
+    w("etc/passwd", _PASSWD)
+    w("etc/group", _GROUP)
+    w("etc/motd", _MOTD)
+    w("etc/issue", _MOTD)
+    w("etc/omnios-release", "OmniOS %s (from-source lightweight OS)\n" % VERSION)
+    w("etc/os-release", _OS_RELEASE)
+    w("etc/hostname", "omnios\n")
+    w("etc/hosts", "127.0.0.1 localhost omnios\n::1 localhost omnios\n")
+    w("etc/shells", "/bin/sh\n/bin/ash\n")
+    w("etc/resolv.conf", "nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
+    w("etc/fstab",
+      "proc  /proc proc  defaults 0 0\n"
+      "sysfs /sys sysfs defaults 0 0\n"
+      "tmpfs /tmp tmpfs defaults 0 0\n"
+      "devpts /dev/pts devpts defaults 0 0\n")
+    w("usr/bin/omnios-desktop", _DESKTOP, 0o755)
 
     print("make-rootfs: assembled %s" % OUT)
-    print("make-rootfs: version %s" % VERSION)
 
 
-def _mk(root, name):
-    """crate a device node branch lazily; for now only directories"""
-    os.makedirs(os.path.join(root, name), exist_ok=True)
-
-
-def _write(root, rel, content):
-    p = os.path.join(root, rel)
+def w(rel, content, mode=0o644):
+    p = os.path.join(OUT, rel)
     with open(p, "w") as f:
         f.write(content)
+    os.chmod(p, mode)
 
 
-_INIT_SCRIPT = r"""#!/bin/sh
-# OmniOS /init — musl + BusyBox userspace, ash shell.
-# Mount the virtual filesystems, seed /dev with mdev, and start init.
-mount -t proc proc /proc
-mount -t sysfs sysfs /sys
-mount -t devtmpfs devtmpfs /dev 2>/dev/null || mount -t tmpfs tmpfs /dev
-mkdir -p /dev/pts /dev/shm /dev/input
-mount -t devpts devpts /dev/pts 2>/dev/null
-mount -t tmpfs tmpfs /tmp
-mount -t tmpfs tmpfs /run 2>/dev/null || true
-# Seed legacy /dev nodes without udev:
-if [ -e /proc/sys/kernel/hotplug ]; then echo /sbin/mdev > /proc/sys/kernel/hotplug; fi
-[ -x /sbin/mdev ] && /sbin/mdev -s 2>/dev/null || true
-[ -e /dev/console ] || mknod /dev/console c 5 1
-[ -e /dev/tty1 ] || mknod /dev/tty1 c 4 1
-[ -e /dev/tty0 ] || mknod /dev/tty0 c 4 0
-[ -e /dev/null ] || mknod /dev/null c 1 3
-[ -e /dev/zero ] || mknod /dev/zero c 1 5
-[ -e /dev/fb0 ] || true
-[ -e /dev/input/mice ] || true
-echo "OmniOS booted. Starting the desktop session."
-# Launch the graphical session on the framebuffer console:
-/usr/bin/omnios-desktop &
-# Fall back to a login shell on the console for rescue:
-exec /sbin/init
-"""
+# Every applet symlink the system may reference (/bin/<name>).
+_APPLETS = [
+    "sh", "ash", "mount", "umount", "cat", "ls", "cp", "mv", "rm", "mkdir",
+    "rmdir", "echo", "grep", "sed", "awk", "vi", "ps", "top", "kill",
+    "killall", "sleep", "date", "hostname", "init", "login", "getty", "su",
+    "ifconfig", "route", "ping", "sync", "halt", "reboot", "poweroff",
+    "dmesg", "mdev", "blkid", "mkfs.ext2", "mkfs.vfat", "swapon", "swapoff",
+    "wget", "nc", "id", "whoami", "clear", "head", "tail", "wc", "sort",
+    "cut", "tr", "uniq", "find", "xargs", "ln", "chmod", "chown", "tar",
+    "gzip", "gunzip", "uname", "df", "du", "free", "uptime", "setterm",
+    "stty", "tty", "pwd", "true", "false", "test", "yes", "printf", "mknod",
+    "expr", "basename", "dirname", "which", "passwd", "adduser", "chroot",
+    "fsck", "mkfs", "losetup", "ip", "tc", "nameif", "telnet", "telnetd",
+    "httpd", "ftpd", "getopt", "watch", "less", "more", "md5sum", "sha256sum",
+]
 
-_INITTAB = """::sysinit:/etc/init.d/rcS
-tty1::respawn:/sbin/getty -L tty1 115200 vt100
-tty2::respawn:/sbin/getty -L tty2 115200 vt100
-ttyS0::respawn:/sbin/getty -L ttyS0 115200 vt100
-::ctrlaltdel:/sbin/reboot
-::shutdown:/bin/umount -a -r
-"""
-
-_PROFILE = """export PATH=/usr/bin:/bin:/sbin:/usr/sbin
-export HOME=/root
-export PS1='omnios:\\w\\$ '
-export TERM=vt100
-export LANG=C.UTF-8
-export DISPLAY=:0
-ulimit -c 0
-alias ll='ls -la'
-alias ls='ls --color=never'
-echo "OmniOS lightweight shell. Type 'omnios-desktop' to launch the GUI."
-"""
-
-_MOTD = """
- Welcome to OmniOS %s — a lightweight OS built from source.
- kernel: Linux (static, FROM-SOURCE)   libc: musl   shell: ash (BusyBox)
- GUI: Nano-X / Microwindows (Windows-style windowing on the framebuffer)
-
- Auto-login shell. Type:  omnios-desktop   -> start the graphical desktop
-"""
-
-_DESKTOP_LAUNCHER = r"""#!/bin/sh
-# OmniOS desktop session: framebuffer -> nano-X server -> windowed apps.
-# The built-in window manager (nanowm) runs inside the server (NANOWM=Y).
-set -e
-
-# Very small framebuffer sanity check; proceed even if no fb yet (simpledrm
-# may need a moment — give it one retry).
-for i in 1 2 3 4 5; do
-    if [ -c /dev/fb0 ]; then break; fi
-    sleep 1
-done
-
-export DISPLAY=:0
-# run the Nano-X server in persistent mode so it survives client reconnect;
-# it reads the keyboard (TTYKBD) and /dev/input/mice itself.
-/usr/bin/nano-X -p &
-NANOX_PID=$!
-trap 'kill $NANOX_PID 2>/dev/null; exit 0' INT TERM
-sleep 2
-
-# Start a couple of floating-window apps as a first desktop.
-/usr/bin/nxclock &
-/usr/bin/nxterm -T "OmniOS terminal" /bin/sh &
-/usr/bin/nxcalc &
-# nxview shows the built-in demo; keep as an optional extra:
-# /usr/bin/nxview &
-
-wait $NANOX_PID
-"""
-
-_GUI_INIT_SCRIPT = r"""#!/bin/sh
-# OmniOS GUI hook run at boot (referenced by /etc/inittab via rcS if present).
-[ -x /usr/bin/omnios-desktop ] && /usr/bin/omnios-desktop &
-"""
+_OS_RELEASE = """\
+NAME="OmniOS"
+ID=omnios
+PRETTY_NAME="OmniOS %s"
+VERSION="%s"
+VERSION_ID=%s
+HOME_URL="https://github.com/OmniNodeCo/OmniOS"
+""" % (VERSION, VERSION, VERSION.split(".")[0])
 
 
 if __name__ == "__main__":

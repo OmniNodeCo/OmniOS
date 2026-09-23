@@ -1,0 +1,34 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Python tool deps
+        run: python3 -m pip install --user --break-system-packages kconfiglib pycdlib
+
+      - name: Syntax-check Python tools
+        run: |
+          python3 -m py_compile tools/*.py
+
+      - name: Shell-check scripts
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh
+
+      - name: Check version consistency
+        run: |
+          [ -n "$(tr -d '[:space:]' < version.txt)" ] || { echo 'empty version'; exit 1; }

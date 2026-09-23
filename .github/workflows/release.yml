@@ -1,0 +1,63 @@
+name: Release OmniOS ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish (blank = whatever the latest build produced)'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+env:
+  OMNIOS_JOBS: 4
+
+jobs:
+  release:
+    name: Publish ISO
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc cpio gzip perl python3 python3-pip \
+            mtools xorriso xz-utils zstd git ca-certificates
+          python3 -m pip install --user --break-system-packages kconfiglib pycdlib
+
+      - name: Determine version
+        id: version
+        run: |
+          v="${{ github.event.inputs.version }}"
+          v="${v#v}"
+          if [ -z "$v" ]; then v="$(tr -d '[:space:]' < version.txt)"; fi
+          echo "version=${v}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build
+        run: |
+          scripts/build.sh fetch
+          scripts/build.sh toolchain
+          scripts/build.sh musl
+          scripts/build.sh userspace
+          scripts/build.sh rootfs
+          scripts/build.sh kernel
+          scripts/build.sh iso
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: OmniOS ${{ steps.version.outputs.version }}
+          files: |
+            build/out/*.iso
+            build/out/*.iso.sha256
+          draft: false
+          prerelease: false

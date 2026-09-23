@@ -1,0 +1,63 @@
+name: Build OmniOS
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths-ignore:
+      - '**.md'
+      - '.github/workflows/release.yml'
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  OMNIOS_JOBS: 4
+
+jobs:
+  build:
+    name: Build (from source)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential bc cpio gzip perl python3 python3-pip \
+            mtools xorriso xz-utils zstd git ca-certificates
+          python3 -m pip install --user --break-system-packages kconfiglib pycdlib
+
+      - name: Fetch upstream sources
+        run: scripts/build.sh fetch
+
+      - name: Build toolchain + userspace + rootfs
+        run: |
+          scripts/build.sh toolchain
+          scripts/build.sh musl
+          scripts/build.sh userspace
+          scripts/build.sh rootfs
+
+      - name: Build the kernel (with embedded initramfs)
+        run: scripts/build.sh kernel
+
+      - name: Assemble the bootable ISO (UEFI)
+        run: scripts/build.sh iso
+
+      - name: Collect artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnios-artifacts
+          path: |
+            build/out/*.iso
+            build/out/*.iso.sha256
+            build/out/omnios-bzImage-*
+          retention-days: 30
+
+      - name: Show ISO checksum
+        run: cat build/out/*.iso.sha256 || true

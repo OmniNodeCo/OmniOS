@@ -14,7 +14,7 @@ source inside this repository.
 | Layer | From source | Notes |
 | --- | --- | --- |
 | Kernel | Linux `v6.12` (git, `torvalds/linux`) | x86_64, monolithic, bootable via EFI stub |
-| C library | musl `1.36.1` | static userspace, no glibc |
+| C library | musl `1.2.6` | static userspace, no glibc |
 | Core tools | BusyBox `1.36.1` | static, ash shell, ~75 applets |
 | GUI | Microwindows / Nano-X | Windows-style windowing on the Linux framebuffer, tiny window manager (nanowm), terminal, clock, calculator, demos |
 | Build tools | NASM, `bc` (gavinhoward), `pycdlib`, `kconfiglib` | only what the build itself needs |
@@ -40,15 +40,42 @@ in `tools/make-config.py`.
 
 ```
 version.txt                        canonical version (single source of truth)
+Makefile                           `make help` — thin wrapper over scripts/build.sh
+scripts/build.sh                   build orchestrator, one stage per arg
 tools/make-config.py               kernel Kconfig resolution (replaces `conf`)
 tools/config/override.config       project kernel options
-tools/make-rootfs.py               assembles build/rootfs (the OS)
+tools/make-rootfs.py               assembles build/rootfs (the OS itself)
+tools/make-iso.py                  assembles the bootable UEFI ISO from the kernel
+tools/make-fat.py                  pure-Python FAT image builder for the EFI System Partition
 tools/config/busybox.config        BusyBox build config
 tools/config/microwindows.config   Nano-X framebuffer build config
 patches/kernel-omnios.patch        the 3 kernel-tree edits, for reproducibility
+.github/workflows/build.yml        CI: builds kernel + ISO, uploads artifacts
+.github/workflows/release.yml      publishes the ISO as a GitHub release
+.github/workflows/ci.yml           static checks (py_compile, shellcheck)
 src/                               upstream source checkouts (git-cloned; not committed)
 build/                             build artifacts (not committed)
 ```
+
+## The OS files
+
+`tools/make-rootfs.py` authors the entire runtime system as an initramfs,
+written to `build/rootfs`:
+
+```
+/init                    first process: mount proc/sysfs/devtmpfs, seed /dev, exec init
+/etc/inittab             BusyBox init (getty on tty1/tty2/ttyS0, /bin/login)
+/etc/init.d/rcS          sysinit: mdev over devtmpfs, hostname, motd, launch the desktop
+/etc/passwd, /etc/group  root + omnios accounts
+/etc/profile             ash login environment
+/usr/bin/omnios-desktop  boots Nano-X + nanowm + nxterm/nxclock/nxcalc on /dev/fb0
+/usr/bin/nano-X, ...     the Nano-X GUI binaries (static)
+/etc/fonts/*.bdf         GUI fonts
+/bin/*                   BusyBox plus applet symlinks (ash, mount, mdev, ...)
+```
+
+The kernel's `CONFIG_INITRAMFS_SOURCE` points at `build/rootfs`, so the whole
+OS is compiled into the single static `bzImage`.
 
 ## Build (in order)
 
@@ -56,24 +83,35 @@ build/                             build artifacts (not committed)
 # 0. Python build deps (PyPI is reachable)
 python3 -m pip install --user --break-system-packages kconfiglib pycdlib
 
-# 1. fetch upstream sources (git protocol)
-#    linux v6.12, musl v1.2.6, busybox 1_36_1, microwindows, gavinhoward/bc
-# 2. build host tools
-#    src/bc:  ./configure.sh && make   (provides `bc` for the kernel build)
-# 3. kernel headers + config
-python3 tools/make-config.py                      # writes .config + generated headers
-# 4. userspace
-#    musl:        ./configure --prefix=... && make && make install   -> build/sysroot
-#    busybox:     make CC=<sysroot>/bin/musl-gcc CONFIG_STATIC=y
-#    microwindows: make COMPILER=<sysroot>/bin/musl-gcc CFLAGS=-Os LDFLAGS=-static
-# 5. root filesystem
-python3 tools/make-rootfs.py                      # -> build/rootfs
-# 6. kernel (embeds the initramfs)
-( cd src/linux && PATH="$PWD/../../src/bc/bin:$PATH" make -j2 bzImage )
+# 1. everything, in order:
+#    fetch -> toolchain -> musl -> busybox -> microwindows -> rootfs -> kernel -> iso
+scripts/build.sh full        # or: make full
+
+# individual stages:
+scripts/build.sh fetch       # git clone linux v6.12, musl, busybox, microwindows, bc
+scripts/build.sh toolchain   # bc + kernel UAPI headers into build/sysroot
+scripts/build.sh musl        # musl libc into build/sysroot
+scripts/build.sh userspace   # musl + busybox + microwindows
+scripts/build.sh rootfs      # assemble build/rootfs via tools/make-rootfs.py
+scripts/build.sh kernel      # tools/make-config.py + bzImage (embeds the initramfs)
+scripts/build.sh iso         # build/out/OmniOS-<version>-amd64.iso (UEFI)
+scripts/build.sh clean       # remove build outputs
 ```
 
-The ready-to-boot artifact is `src/linux/arch/x86/boot/bzImage` — a static
-Linux kernel with the full OmniOS root filesystem and GUI embedded.
+The ready-to-boot artifacts land in `build/out/`:
+
+- `omnios-bzImage-<version>` — the static kernel, itself a UEFI bootloader
+- `OmniOS-<version>-amd64.iso` + `.sha256` — the bootable UEFI ISO
+
+The ISO is produced two ways, chosen automatically:
+
+- **`xorriso` + `mtools`** when available (the CI path) — builds a proper
+  El Torito "*-eltorito-alt-boot -e efi.img*" image.
+- **pure Python** otherwise (`pycdlib` + `tools/make-fat.py`) — so the ISO can
+  still be produced on a minimal host with no ISO tooling beyond Python.
+
+`tools/make-fat.py` builds a small FAT16 "superfloppy" EFI System Partition
+(`/EFI/BOOT/BOOTX64.EFI`) without requiring `dosfstools`/`mtools`.
 
 ## Kernel tree edits
 
@@ -94,6 +132,8 @@ Three minimal, justified edits (see `patches/kernel-omnios.patch`):
 - kernel: configures and compiles to a final linking stage (in progress)
 - musl, BusyBox (static), Nano-X (static) all build successfully
 - root filesystem assembles completely
+- the ISO/EFI tooling is written and verified to produce a valid UEFI El Torito image
 
-The next milestone is producing the bootable `bzImage` (and, for BIOS/ISO
-testing, a boot sector route). See the build notes above for the exact steps.
+The next milestone is finishing the kernel `bzImage` link and booting the
+resulting `OmniOS-<version>-amd64.iso`. See the build notes above for the
+exact steps.
