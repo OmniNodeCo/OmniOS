@@ -156,7 +156,7 @@ static int              g_lock_stage;        /* 0 = clock, 1 = sign in      */
 static char             g_pw[64];            /* password being typed        */
 static int              g_pw_bad;            /* last attempt was wrong      */
 static uint32_t        *g_lockbg, *g_signbg; /* dimmed / frosted wallpaper  */
-static int              g_lockbg_wall = -1;
+static int              g_lockbg_wall = -1, g_signbg_wall = -1;
 static int              g_meta_held, g_meta_used;    /* Windows key chords  */
 static int g_full_present;          /* next present rewrites every pixel   */
 static int g_px, g_py;              /* pointer (mouse) position            */
@@ -2226,27 +2226,41 @@ static void shell_draw_background(struct omni_wm *wm)
 /* lock + sign-in screen                                              */
 /* ------------------------------------------------------------------ */
 
-/* dimmed wallpaper (lock) and frosted wallpaper (sign in), cached per style */
+/* dimmed wallpaper (lock screen), cached per style */
 static void lock_backgrounds(void)
 {
     size_t n = (size_t)g_dev.w * (size_t)g_dev.h, i;
-    struct raster fr;
-    if (g_lockbg_wall == g_set_wall && g_lockbg && g_signbg)
+    if (g_lockbg_wall == g_set_wall && g_lockbg)
         return;
     if (!g_lockbg)
         g_lockbg = malloc(n * sizeof(uint32_t));
-    if (!g_signbg)
-        g_signbg = malloc(n * sizeof(uint32_t));
-    if (!g_lockbg || !g_signbg || !g_wall)
+    if (!g_lockbg || !g_wall)
         return;
     for (i = 0; i < n; i++)
         g_lockbg[i] = th_blend(g_wall[i], 0x000000, 70);
+    g_lockbg_wall = g_set_wall;
+}
+
+/* frosted wallpaper (sign in), cached per style. Made when the sign-in
+ * screen is first shown rather than with the lock screen: blurring the
+ * whole screen is the slowest step of drawing the lock screen, and the
+ * lock screen is what the user waits for at startup. */
+static void sign_background(void)
+{
+    size_t n = (size_t)g_dev.w * (size_t)g_dev.h, i;
+    struct raster fr;
+    if (g_signbg_wall == g_set_wall && g_signbg)
+        return;
+    if (!g_signbg)
+        g_signbg = malloc(n * sizeof(uint32_t));
+    if (!g_signbg || !g_wall)
+        return;
     memcpy(g_signbg, g_wall, n * sizeof(uint32_t));
     raster_init(&fr, g_signbg, g_dev.w, g_dev.h, g_dev.w);
     th_frost(&fr, 0, 0, g_dev.w, g_dev.h, 0, 14);
     for (i = 0; i < n; i++)
         g_signbg[i] = th_blend(g_signbg[i], 0x000000, 100);
-    g_lockbg_wall = g_set_wall;
+    g_signbg_wall = g_set_wall;
 }
 
 static void shell_lock(void)
@@ -2319,6 +2333,7 @@ static void draw_lock(void)
     } else {                                     /* sign in */
         int cy, bx, by, bw, bh, nw;
         const char *name = omni_account_display();
+        sign_background();
         if (g_signbg)
             memcpy(r->bits, g_signbg, (size_t)r->w * (size_t)r->h * sizeof(uint32_t));
         signin_geom(&cy, &bx, &by, &bw, &bh);
@@ -2884,6 +2899,12 @@ void omni_shell_run(void)
     /* first frame (full present), then the cursor on top */
     omni_wm_paint(&g_wm);
     cursor_move(g_px, g_py);
+    {
+        /* the kernel log's time stamp on this line is the boot time */
+        char line[64];
+        snprintf(line, sizeof(line), "desktop: ready, %dx%d\n", g_screen.w, g_screen.h);
+        omni_console_puts(line);
+    }
 
     for (;;) {
         time_t t = time(NULL);
