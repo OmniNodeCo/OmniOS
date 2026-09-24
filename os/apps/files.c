@@ -4,6 +4,9 @@
  * Minimal file manager: lists a directory, and pressing Enter on a
  * subdirectory enters it. Up arrow or ".." line goes to the parent.
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <dirent.h>
 #include <stdio.h>
 #include <stdlib.h>

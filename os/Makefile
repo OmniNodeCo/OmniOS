@@ -48,7 +48,7 @@ $(OUTDIR)/ominit: $(KER_OBJ)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 # --- bundled apps --------------------------------------------------------
-$(OUTDIR)/omnios-term: apps/terminal.o $(APP_OBJ) gui/client.o gui/protocol.o
+$(OUTDIR)/omnios-term: apps/terminal.o apps/vt.o gui/client.o gui/protocol.o
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
@@ -85,7 +85,8 @@ gui/wm.o: gui/wm.h gui/protocol.h
 gui/protocol.o: gui/protocol.h
 gui/client.o: gui/client.h gui/protocol.h
 apps/app.o: apps/app.h
-apps/terminal.o: apps/app.h
+apps/terminal.o: apps/vt.h gui/client.h gui/wm.h
+apps/vt.o: apps/vt.h
 apps/files.o: apps/app.h
 apps/calc.o: apps/app.h
 apps/edit.o: apps/app.h

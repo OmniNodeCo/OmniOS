@@ -437,7 +437,10 @@ void omni_shell_run(void)
 {
     struct osfb fb;
     struct omni_devs devs;
-    struct pollfd pfds[1 + 8 + 1 + 1];   /* wm listener + ev* + mice + tty */
+    /* wm listener + ev* + mice + tty, then one slot per app connection */
+    struct pollfd pfds[1 + 8 + 1 + 1 + OMNI_WM_MAX_CLI];
+    int pfd_ci[OMNI_WM_MAX_CLI];         /* client -> pfds index, -1 none */
+    int npoll;
     int nfds_dev, nfds;
     int clock_last = -1;
     int lfdidx = 0;
@@ -523,24 +526,35 @@ void omni_shell_run(void)
             }
         }
 
-        if (poll(pfds, (nfds_t)nfds, 120) < 0)
+        /* app connections are polled too, so an app's drawing wakes the
+         * loop at once instead of waiting for the next 120 ms tick */
+        npoll = nfds;
+        for (ci = 0; ci < OMNI_WM_MAX_CLI; ci++) {
+            pfd_ci[ci] = -1;
+            if (g_wm.clients[ci].fd >= 0) {
+                pfds[npoll].fd = g_wm.clients[ci].fd;
+                pfds[npoll].events = POLLIN;
+                pfds[npoll].revents = 0;
+                pfd_ci[ci] = npoll++;
+            }
+        }
+
+        if (poll(pfds, (nfds_t)npoll, 120) < 0)
             continue;
 
         /* new client connections */
         if (pfds[lfdidx].revents & POLLIN)
             omni_wm_accept(&g_wm);
 
-        /* dispatch client protocol (non-blocking, one pass each) */
+        /* dispatch client protocol (non-blocking; drains each socket) */
         for (ci = 0; ci < OMNI_WM_MAX_CLI; ci++) {
-            if (g_wm.clients[ci].fd >= 0) {
-                struct pollfd pfd;
-                pfd.fd = g_wm.clients[ci].fd;
-                pfd.events = POLLIN;
-                pfd.revents = 0;
-                if (poll(&pfd, 1, 0) > 0 && (pfd.revents & POLLIN))
-                    omni_wm_handle_client(&g_wm, ci);
-            }
+            int k = pfd_ci[ci];
+            if (k >= 0 && g_wm.clients[ci].fd == pfds[k].fd &&
+                (pfds[k].revents & (POLLIN | POLLHUP | POLLERR)))
+                omni_wm_handle_client(&g_wm, ci);
         }
+        if (g_wm.dirty)                /* one repaint for the whole batch */
+            redraw = 1;
 
         /* input devices */
         {

@@ -119,11 +119,11 @@ int omni_client_clear(struct omni_client_conn *c, uint32_t rgb)
 {
     char line[OMNI_PROTO_MAX_LINE];
     char hexc[16];
-    long num[3] = { c->win, 0, 0 };
+    long num[1] = { c->win };
     if (c->fd < 0 || c->win <= 0)
         return -1;
     snprintf(hexc, sizeof(hexc), "%06x", rgb & 0xffffff);
-    proto_build_text(line, sizeof(line), "CLEAR", 3, num, hexc);
+    proto_build_text(line, sizeof(line), "CLEAR", 1, num, hexc);
     return proto_send(c->fd, line);
 }
 
@@ -160,6 +160,17 @@ int omni_client_text(struct omni_client_conn *c, int x, int y, const char *s)
     if (c->fd < 0 || c->win <= 0)
         return -1;
     proto_build_text(line, sizeof(line), "TEXT", 3, num, s);
+    return proto_send(c->fd, line);
+}
+
+int omni_client_textc(struct omni_client_conn *c, int x, int y,
+                      uint32_t fg, uint32_t bg, const char *s)
+{
+    char line[OMNI_PROTO_MAX_LINE];
+    long num[5] = { c->win, x, y, (long)(fg & 0xffffff), (long)(bg & 0xffffff) };
+    if (c->fd < 0 || c->win <= 0)
+        return -1;
+    proto_build_text(line, sizeof(line), "TEXTC", 5, num, s);
     return proto_send(c->fd, line);
 }
 

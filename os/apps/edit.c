@@ -4,6 +4,9 @@
  * Tiny line-oriented text editor client: type to append, Enter for newline,
  * Backspace to remove the last typed character.
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>

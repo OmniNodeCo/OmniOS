@@ -6,7 +6,9 @@
  *
  * Transport: SOCK_STREAM UNIX socket at /tmp/.omnios-wm. Every message is a
  * single line terminated by '\n'. Fields are space-separated; a "text"
- * field (TITLE / TEXT / ERR) extends to end-of-line.
+ * field (TITLE / TEXT / TEXTC / ERR / colours) extends to end-of-line and
+ * is taken verbatim after the verb's fixed count of numeric fields, so
+ * "TEXT 1 10 10 42" draws "42".
  *
  *   client -> server:
  *     HELLO <proto> <appname>\n      introduce (proto: 1)
@@ -18,6 +20,7 @@
  *     FILL  <win> <x> <y> <w> <h> <rrggbb>\n
  *     RECT  <win> <x> <y> <w> <h> <rrggbb>\n
  *     TEXT  <win> <x> <y> <text...>\n
+ *     TEXTC <win> <x> <y> <fg> <bg> <text...>\n   fg/bg: 0xRRGGBB as decimal
  *     QUIT\n
  *
  *   server -> client:

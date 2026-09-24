@@ -3,6 +3,9 @@
  *
  * Reads /proc and friends and displays a System-Info sheet.
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>

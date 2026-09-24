@@ -365,6 +365,8 @@ void omni_wm_paint(struct omni_wm *wm)
 {
     int i;
 
+    wm->dirty = 0;
+
     /* desktop background: shell-provided wallpaper, else built-in gradient */
     if (wm->draw_background)
         wm->draw_background(wm);
@@ -541,15 +543,15 @@ static int handle_line(struct omni_wm *wm, int ci, const char *line)
 
     if (strcmp(m.verb, "TITLE") == 0) {
         snprintf(cl->win->title, sizeof(cl->win->title), "%s", m.text);
-        omni_wm_paint(wm);
+        wm->dirty = 1;
     } else if (strcmp(m.verb, "RAISE") == 0) {
         omni_wm_raise(wm, cl->win);
-        omni_wm_paint(wm);
+        wm->dirty = 1;
     } else if (strcmp(m.verb, "CLEAR") == 0) {
         struct raster *s = &cl->win->surface;
         uint32_t c = m.text[0] ? parse_color(m.text) : OMNI_COLOR_FACE;
         raster_fill(s, 0, 0, s->w, s->h, c);
-        omni_wm_paint(wm);
+        wm->dirty = 1;
     } else if (strcmp(m.verb, "FILL") == 0) {
         struct raster *s = &cl->win->surface;
         uint32_t c;
@@ -557,7 +559,7 @@ static int handle_line(struct omni_wm *wm, int ci, const char *line)
         c = parse_color(m.text);
         raster_fill(s, (int)m.num[1], (int)m.num[2],
                     (int)m.num[3], (int)m.num[4], c);
-        omni_wm_paint(wm);
+        wm->dirty = 1;
     } else if (strcmp(m.verb, "RECT") == 0) {
         struct raster *s = &cl->win->surface;
         uint32_t c;
@@ -565,13 +567,25 @@ static int handle_line(struct omni_wm *wm, int ci, const char *line)
         c = parse_color(m.text);
         raster_rect(s, (int)m.num[1], (int)m.num[2],
                     (int)m.num[3], (int)m.num[4], c);
-        omni_wm_paint(wm);
+        wm->dirty = 1;
     } else if (strcmp(m.verb, "TEXT") == 0) {
         struct raster *s = &cl->win->surface;
         struct canvas cv;
         canvas_init(&cv, s, OMNI_COLOR_TEXT, OMNI_COLOR_FACE);
         canvas_text(&cv, m.text, (int)m.num[1], (int)m.num[2]);
-        omni_wm_paint(wm);
+        wm->dirty = 1;
+    } else if (strcmp(m.verb, "TEXTC") == 0) {
+        /* TEXTC <win> <x> <y> <fg> <bg> <text>: explicit colours, clipped
+         * at the window edge (no wrap: a wrap at the bottom would scroll
+         * the client's whole surface). */
+        struct raster *s = &cl->win->surface;
+        struct canvas cv;
+        if (m.n < 5) { send_line(cl->fd, "ERR TEXTC x y fg bg text\n"); return 0; }
+        canvas_init(&cv, s, (uint32_t)m.num[3] | 0xff000000u,
+                    (uint32_t)m.num[4] | 0xff000000u);
+        cv.linewrap = 0;
+        canvas_text(&cv, m.text, (int)m.num[1], (int)m.num[2]);
+        wm->dirty = 1;
     } else {
         char buf[OMNI_PROTO_MAX_LINE];
         snprintf(buf, sizeof(buf), "ERR unknown verb %s\n", m.verb);

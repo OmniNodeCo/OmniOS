@@ -33,6 +33,9 @@ int  omni_client_rect(struct omni_client_conn *c, int x, int y, int w, int h,
                       uint32_t rgb);
 int  omni_client_text(struct omni_client_conn *c, int x, int y,
                       const char *s);
+/* text in explicit colours (0xRRGGBB); every glyph cell is painted opaque */
+int  omni_client_textc(struct omni_client_conn *c, int x, int y,
+                       uint32_t fg, uint32_t bg, const char *s);
 
 /* retrieve one pending event from the server: 1 = got event, 0 = none,
  * -1 = disconnected. Event semantics mirror struct omni_input + win id.  */

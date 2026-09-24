@@ -12,10 +12,32 @@
 
 #include "protocol.h"
 
+/* How many leading numeric fields each verb carries (both directions,
+ * see protocol.h). Once they are read, everything after the single
+ * separating space is the text field, taken verbatim — so text that
+ * happens to look numeric ("42", "-5", a colour such as "101418") or that
+ * starts with spaces arrives intact. Unknown verbs (-1) keep the old
+ * heuristic: numbers until the first non-numeric token. */
+static int verb_numc(const char *verb)
+{
+    static const struct { const char *verb; int n; } t[] = {
+        { "HELLO", 2 }, { "OPEN",  2 }, { "CLOSE", 1 }, { "TITLE", 1 },
+        { "RAISE", 1 }, { "CLEAR", 1 }, { "FILL",  5 }, { "RECT",  5 },
+        { "TEXT",  3 }, { "TEXTC", 5 }, { "QUIT",  0 }, { "OK",    1 },
+        { "ERR",   0 }, { "KEY",   4 }, { "BTN",   5 }, { "BYE",   0 },
+    };
+    size_t i;
+    for (i = 0; i < sizeof(t) / sizeof(t[0]); i++)
+        if (strcmp(verb, t[i].verb) == 0)
+            return t[i].n;
+    return -1;
+}
+
 int proto_parse(const char *line, struct proto_msg *m)
 {
     const char *p = line;
     const char *tok;
+    int maxn;
 
     memset(m, 0, sizeof(*m));
 
@@ -28,9 +50,20 @@ int proto_parse(const char *line, struct proto_msg *m)
         m->verb[i] = '\0';
     }
 
-    /* numeric fields: only fully-numeric tokens count; the first
-     * non-numeric token starts the text field. */
+    /* numeric fields: only fully-numeric tokens count, at most maxn of
+     * them; the first non-numeric token (or anything after the maxn-th
+     * number) starts the text field. */
+    maxn = verb_numc(m->verb);
     for (;;) {
+        if (maxn >= 0 && m->n >= maxn) {
+            size_t i = 0;
+            if (*p == ' ')
+                p++;                     /* exactly one separator */
+            while (*p && *p != '\n' && i < sizeof(m->text) - 1)
+                m->text[i++] = *p++;
+            m->text[i] = '\0';
+            break;
+        }
         while (*p == ' ') p++;
         if (*p == '\0' || *p == '\n')
             break;

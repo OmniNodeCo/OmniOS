@@ -5,6 +5,9 @@
  * and operators are typed on the keyboard (or tapped via the mouse if the
  * server sends BTN events).
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

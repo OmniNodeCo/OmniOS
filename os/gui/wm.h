@@ -65,6 +65,10 @@ struct omni_wm {
     int    nwin;
     struct omni_win *active;
 
+    /* set by client drawing commands; the shell repaints once per loop
+     * pass instead of once per message (omni_wm_paint() clears it)     */
+    int    dirty;
+
     int    pointer_x, pointer_y;
     int    button_down, button_which;
     int    drag;                /* 0 none, 1 move, 2..9 resize zone      */
