@@ -22,7 +22,7 @@
 
 #define SS        4             /* supersampling factor per axis        */
 #define ICON_MAX  128           /* largest size rendered (px)           */
-#define CACHE_N   96
+#define CACHE_N   160           /* (icon, size) pairs kept rendered */
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -228,6 +228,14 @@ static void hole(struct ic *c, float x, float y, float r)
     struct shape s;
     memset(&s, 0, sizeof(s));
     s.type = SH_CIRCLE; s.x = x; s.y = y; s.r = r;
+    fill(c, &s, P(0), 1);
+}
+/* punch a transparent rounded rectangle (outlines: fill, then cut) */
+static void cut_rrect(struct ic *c, float x, float y, float w, float h, float r)
+{
+    struct shape s;
+    memset(&s, 0, sizeof(s));
+    s.type = SH_RRECT; s.x = x; s.y = y; s.w = w; s.h = h; s.r = r;
     fill(c, &s, P(0), 1);
 }
 /* ring between radii rin..rout; arc from a0 to a1 degrees, counter-
@@ -508,6 +516,97 @@ static void ic_lock(struct ic *c)                       /* 'k' sign-in / lock */
     rrect(c, 22.8f, 30, 2.4f, 7, 1.2f, P(0xff78350f));
 }
 
+/* ---- desktop chrome: globe + monochrome glyphs ------------------------ */
+
+static void ic_globe(struct ic *c)                      /* 'w' Network & internet */
+{
+    struct paint wl = P(0xf0ffffff);
+    circle(c, 24, 24, 21, V(0xff38bdf8, 0xff0369a1, 3, 45));
+    ring(c, 24, 24, 13, 15.2f, 0, 0, wl);
+    ring(c, 34.5f, 24, 16.4f, 18.4f, 127, 233, wl);     /* meridians */
+    ring(c, 13.5f, 24, 16.4f, 18.4f, 307, 53, wl);
+    line(c, 24, 10, 24, 38, 2.2f, wl);
+    line(c, 10, 24, 38, 24, 2.2f, wl);
+    line(c, 12.5f, 17, 35.5f, 17, 2, wl);
+    line(c, 12.5f, 31, 35.5f, 31, 2, wl);
+}
+
+#define MONO 0xfff3f5f9         /* light glyphs for the dark taskbar and panels */
+
+static void ic_power(struct ic *c)                      /* 'P' power */
+{
+    ring(c, 24, 26, 12.2f, 16, 118, 62, P(MONO));
+    line(c, 24, 7, 24, 24, 3.8f, P(MONO));
+}
+
+static void ic_search(struct ic *c)                     /* 's' search */
+{
+    ring(c, 20.5f, 20.5f, 10.2f, 14, 0, 0, P(MONO));
+    line(c, 30.5f, 30.5f, 41, 41, 5, P(MONO));
+}
+
+static void ic_ethernet(struct ic *c)                   /* 'e' wired network */
+{
+    rrect(c, 6, 8, 36, 25, 4.5f, P(MONO));
+    cut_rrect(c, 9.6f, 11.6f, 28.8f, 17.8f, 1.6f);
+    rrect(c, 21, 32, 6, 5, 0, P(MONO));
+    rrect(c, 13, 37, 22, 3.8f, 1.9f, P(MONO));
+}
+
+static void ic_gear_mono(struct ic *c)                  /* 'g' Settings button */
+{
+    int k;
+    for (k = 0; k < 8; k++) {
+        float a = (float)k * 45.0f, ux = (float)cos(a * M_PI / 180.0), uy = -(float)sin(a * M_PI / 180.0);
+        float vx = -uy, vy = ux;
+        float pts[8];
+        pts[0] = 24 + ux * 12 + vx * 4.6f;   pts[1] = 24 + uy * 12 + vy * 4.6f;
+        pts[2] = 24 + ux * 19.5f + vx * 3.4f; pts[3] = 24 + uy * 19.5f + vy * 3.4f;
+        pts[4] = 24 + ux * 19.5f - vx * 3.4f; pts[5] = 24 + uy * 19.5f - vy * 3.4f;
+        pts[6] = 24 + ux * 12 - vx * 4.6f;   pts[7] = 24 + uy * 12 - vy * 4.6f;
+        poly(c, pts, 4, P(MONO));
+    }
+    circle(c, 24, 24, 14.5f, P(MONO));
+    hole(c, 24, 24, 6.2f);
+}
+
+static void ic_refresh(struct ic *c)                    /* 'r' automatic updates */
+{
+    static const float h1[] = { 38, 8, 42.5f, 21, 29.5f, 19.5f };
+    static const float h2[] = { 10, 40, 5.5f, 27, 18.5f, 28.5f };
+    ring(c, 24, 24, 12.5f, 16.5f, 25, 160, P(MONO));
+    ring(c, 24, 24, 12.5f, 16.5f, 205, 340, P(MONO));
+    poly(c, h1, 3, P(MONO));
+    poly(c, h2, 3, P(MONO));
+}
+
+static void ic_clock_mono(struct ic *c)                 /* 'c' 24-hour clock */
+{
+    ring(c, 24, 24, 15, 19, 0, 0, P(MONO));
+    line(c, 24, 24, 24, 13.5f, 3.6f, P(MONO));
+    line(c, 24, 24, 31, 28, 3.6f, P(MONO));
+}
+
+static void ic_taskbar_mono(struct ic *c)               /* 'b' centred taskbar */
+{
+    rrect(c, 3, 30, 42, 12, 3, P(MONO));
+    cut_rrect(c, 5.6f, 32.6f, 36.8f, 6.8f, 1.6f);
+    rrect(c, 15, 34, 5, 3, 1, P(MONO));
+    rrect(c, 21.5f, 34, 5, 3, 1, P(MONO));
+    rrect(c, 28, 34, 5, 3, 1, P(MONO));
+    rrect(c, 11, 8, 26, 17, 3, P(0x99f3f5f9));    /* a window above it */
+}
+
+static void ic_lock_mono(struct ic *c)                  /* 'l' Lock button */
+{
+    ring(c, 24, 19, 7, 10.8f, 0, 180, P(MONO));
+    rrect(c, 13.2f, 18, 3.8f, 5, 0, P(MONO));
+    rrect(c, 30.9f, 18, 3.8f, 5, 0, P(MONO));
+    rrect(c, 10, 21, 28, 22, 5, P(MONO));
+    hole(c, 24, 30.5f, 3.2f);
+    cut_rrect(c, 22.6f, 30.5f, 2.8f, 7, 1.4f);
+}
+
 struct icon_def { char id; void (*draw)(struct ic *); };
 
 static const struct icon_def g_icons[] = {
@@ -518,7 +617,10 @@ static const struct icon_def g_icons[] = {
     { '*', ic_mines },    { '2', ic_2048 },     { 'X', ic_tictactoe },
     { 'm', ic_monitor },  { 'p', ic_palette },  { 'a', ic_apps },
     { 'u', ic_user },     { 't', ic_timelang }, { 'U', ic_update },
-    { 'k', ic_lock },
+    { 'k', ic_lock },     { 'w', ic_globe },    { 'P', ic_power },
+    { 's', ic_search },   { 'e', ic_ethernet }, { 'g', ic_gear_mono },
+    { 'r', ic_refresh },  { 'c', ic_clock_mono }, { 'l', ic_lock_mono },
+    { 'b', ic_taskbar_mono },
 };
 #define N_ICONS ((int)(sizeof(g_icons) / sizeof(g_icons[0])))
 
