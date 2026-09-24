@@ -16,7 +16,7 @@ source inside this repository.
 | Kernel | Linux `v6.12` (git, `torvalds/linux`) | x86_64, monolithic, bootable via EFI stub |
 | C library | musl `1.2.6` | static userspace, no glibc |
 | Core tools | BusyBox `1.36.1` | static, ash shell, ~75 applets |
-| GUI | Microwindows / Nano-X | Windows-style windowing on the Linux framebuffer, tiny window manager (nanowm), terminal, clock, calculator, demos |
+| GUI | OmniOS desktop (written from scratch, `os/gui`) | Windows-style desktop on the Linux framebuffer: compositing window manager, taskbar, Start menu, App Store and bundled apps. (Microwindows / Nano-X is still built and shipped as an unused fallback from earlier versions.) |
 | Build tools | `bc` (gavinhoward), `musl-gcc`, `pycdlib`, flex+bison | only what the build itself needs |
 
 Everything boots from an **embedded initramfs** built into the kernel, so a
@@ -92,8 +92,12 @@ musl, and lives in `os/`:
   drag/move/resize and close-button chrome; `protocol` a line-based window
   protocol over a UNIX socket; `client` the app-side library that connects
   to the shell; `shell` the Windows-like desktop (taskbar, Start menu,
-  clock, wallpaper); `catalog` the app catalog behind the Start menu and
-  the App Store; `desktop` the `omnios-desktop` executable.
+  clock) and its compositor, which builds each frame in RAM and copies only
+  the changed 16-pixel blocks to the framebuffer, with the mouse cursor as
+  a separate sprite; `theme` the drawing toolkit behind the look
+  (generated wallpaper, rounded corners, shadows, frosted glass, gradients
+  and app icons); `catalog` the app catalog behind the Start menu and the
+  App Store; `desktop` the `omnios-desktop` executable.
 - **`os/apps/`** — bundled applications each running as its own client
   process: `omnios-term` (a real shell on a pseudo-terminal, shown through
   the VT100-subset emulator in `vt.c`), `omnios-files`, `omnios-calc`,

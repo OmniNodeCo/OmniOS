@@ -996,7 +996,10 @@ void omni_shell_run(void)
             }
         }
 
-        if (poll(pfds, (nfds_t)npoll, 120) < 0)
+        /* input devices and app sockets wake the loop at once; the timeout
+         * only paces the once-a-second checks (taskbar clock, input-device
+         * rescan, input banner), so an idle desktop wakes once a second */
+        if (poll(pfds, (nfds_t)npoll, 1000) < 0)
             continue;
 
         /* new client connections */
@@ -1010,6 +1013,11 @@ void omni_shell_run(void)
                 (pfds[k].revents & (POLLIN | POLLHUP | POLLERR)))
                 omni_wm_handle_client(&g_wm, ci);
         }
+
+        /* reap apps whose windows were closed, so they do not linger as
+         * zombies until the next launch */
+        while (waitpid(-1, NULL, WNOHANG) > 0)
+            ;
 
         /* input devices */
         {
