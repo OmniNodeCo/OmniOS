@@ -47,7 +47,7 @@ os/                                from-scratch OmniOS source (init, libs, GUI)
   kernel/                          PID 1 init (ominit) + mount/device helpers
   lib/                             framebuffer, rasterizer, text canvas, input
   gui/                             desktop shell, window manager, protocol, client
-  apps/                            terminal, files, calc, editor, sysinfo, about
+  apps/                            terminal, files, calc, editor, sysinfo, about, App Store, clock, snake
   vendor/                          vendored public-domain stb_image + font8x8
 tools/config/override.config       project kernel options (merged over defconfig)
 tools/make-rootfs.py               assembles build/rootfs (the OS itself)
@@ -92,10 +92,15 @@ musl, and lives in `os/`:
   drag/move/resize and close-button chrome; `protocol` a line-based window
   protocol over a UNIX socket; `client` the app-side library that connects
   to the shell; `shell` the Windows-like desktop (taskbar, Start menu,
-  clock, wallpaper); `desktop` the `omnios-desktop` executable.
+  clock, wallpaper); `catalog` the app catalog behind the Start menu and
+  the App Store; `desktop` the `omnios-desktop` executable.
 - **`os/apps/`** — bundled applications each running as its own client
-  process: `omnios-term`, `omnios-files`, `omnios-calc`, `omnios-edit`,
-  `omnios-sysinfo`, `omnios-about`.
+  process: `omnios-term` (a real shell on a pseudo-terminal, shown through
+  the VT100-subset emulator in `vt.c`), `omnios-files`, `omnios-calc`,
+  `omnios-edit`, `omnios-sysinfo`, `omnios-about`, and `omnios-store`, the
+  App Store, which installs and removes apps from the Start menu —
+  including `omnios-clock` and `omnios-snake`, which only come from the
+  store. The installed set lives in `/var/lib/omnios/installed-apps`.
 
 The GUI model mirrors a real desktop: one display server owns /dev/fb0, and
 every application is a separate process that draws into its window over the

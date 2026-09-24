@@ -216,7 +216,8 @@ def main():
     # ---- directory skeleton ------------------------------------------------
     for d in ("bin", "sbin", "usr/bin", "usr/sbin", "usr/lib", "usr/share",
               "etc", "etc/init.d", "etc/fonts", "dev", "proc", "sys", "tmp",
-              "run", "var", "var/log", "var/run", "mnt", "root", "home/omnios"):
+              "run", "var", "var/log", "var/run", "var/lib/omnios", "mnt",
+              "root", "home/omnios"):
         os.makedirs(os.path.join(OUT, d), exist_ok=True)
 
     # ---- OmniOS core binaries (from-scratch kernel core + GUI) -------------
@@ -224,7 +225,8 @@ def main():
     # omnios-desktop    the desktop shell (window manager + display server)
     # omnios-*          bundled desktop apps
     for b in ("ominit", "omnios-desktop", "omnios-term", "omnios-files",
-              "omnios-calc", "omnios-edit", "omnios-sysinfo", "omnios-about"):
+              "omnios-calc", "omnios-edit", "omnios-sysinfo", "omnios-about",
+              "omnios-store", "omnios-clock", "omnios-snake"):
         s = os.path.join(OS_BIN, b)
         if os.path.exists(s):
             dst = os.path.join(OUT, "usr", "bin", b)

@@ -22,6 +22,7 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
+#include "catalog.h"
 #include "shell.h"
 #include "wm.h"
 
@@ -47,15 +48,27 @@ static uint32_t g_cursor_scratch[OMNI_WM_CURSOR_W * OMNI_WM_CURSOR_H
 
 static struct canvas g_cursor_cv;   /* bound to the cursor scratch         */
 
-static const struct omni_menu_item g_menu[] = {
-    { "Terminal",     "/usr/bin/omnios-term" },
-    { "File Manager", "/usr/bin/omnios-files" },
-    { "Calculator",   "/usr/bin/omnios-calc" },
-    { "Text Editor",  "/usr/bin/omnios-edit" },
-    { "System Info",  "/usr/bin/omnios-sysinfo" },
-    { "About OmniOS", "/usr/bin/omnios-about" },
-};
-static const int g_menu_n = (int)(sizeof(g_menu) / sizeof(g_menu[0]));
+/* Start menu entries: the installed apps from the catalog (catalog.c).
+ * Rebuilt each time the menu opens, so the App Store's changes show up
+ * straight away. */
+static struct omni_menu_item g_menu[OMNI_CATALOG_MAX];
+static int g_menu_n;
+
+static void menu_reload(void)
+{
+    unsigned char installed[OMNI_CATALOG_MAX];
+    int i;
+
+    omni_apps_load(installed);
+    g_menu_n = 0;
+    for (i = 0; i < omni_catalog_n && g_menu_n < OMNI_CATALOG_MAX; i++) {
+        if (!installed[i] || access(omni_catalog[i].path, X_OK) != 0)
+            continue;               /* not installed, or not in this image */
+        g_menu[g_menu_n].label = omni_catalog[i].name;
+        g_menu[g_menu_n].path = omni_catalog[i].path;
+        g_menu_n++;
+    }
+}
 
 static const int TASKBAR_H = 30;
 
@@ -341,6 +354,7 @@ static int menu_hit(int x, int y, int *idx)
 static void open_menu(void)
 {
     int row_h = 22;
+    menu_reload();
     g_mx = 4;
     g_my = g_screen.h - TASKBAR_H - (g_menu_n + 1) * row_h - 8;
     if (g_my < 0)
