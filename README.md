@@ -16,7 +16,7 @@ source inside this repository.
 | Kernel | Linux `v6.12` (git, `torvalds/linux`) | x86_64, monolithic, bootable via EFI stub |
 | C library | musl `1.2.6` | static userspace, no glibc |
 | Core tools | BusyBox `1.36.1` | static, ash shell, ~75 applets |
-| GUI | OmniOS desktop (written from scratch, `os/gui`) | Windows-style desktop on the Linux framebuffer: compositing window manager, taskbar, Start menu, App Store and bundled apps. (Microwindows / Nano-X is still built and shipped as an unused fallback from earlier versions.) |
+| GUI | OmniOS desktop (written from scratch, `os/gui`) | Windows 11-style desktop on the Linux framebuffer: compositing window manager, centred taskbar, Start menu with search, Quick Settings, desktop icons, App Store and bundled apps. (Microwindows / Nano-X is still built and shipped as an unused fallback from earlier versions.) |
 | Build tools | `bc` (gavinhoward), `musl-gcc`, `pycdlib`, flex+bison | only what the build itself needs |
 
 Everything boots from an **embedded initramfs** built into the kernel, so a
@@ -93,25 +93,26 @@ musl, and lives in `os/`:
 - **`os/gui/`** — `wm` the window manager/display server with Z-ordering,
   drag/move/resize and close-button chrome; `protocol` a line-based window
   protocol over a UNIX socket; `client` the app-side library that connects
-  to the shell; `shell` the Windows-like desktop (taskbar, Start menu,
-  clock) and its compositor, which builds each frame in RAM and copies only
+  to the shell; `shell` the Windows 11-like desktop and its compositor
+  (below), which builds each frame in RAM and copies only
   the changed 16-pixel blocks to the framebuffer, with the mouse cursor as
   a separate sprite; `theme` the drawing toolkit behind the look
   (generated wallpaper, rounded corners, shadows, frosted glass, gradients
   and app icons); `icons` the vector pictograms for every app and Settings
   page; `catalog` the app catalog behind the Start menu and the App Store;
   `settings` the user's settings file (wallpaper, accent colour, clock,
-  time zone, updates, sign-in); `account` the sign-in account and its
-  password (`/etc/shadow`); `updstat` the OmniOS Update status shared by the
-  updater, Settings and the desktop; `desktop` the `omnios-desktop`
-  executable. The shell also draws the lock and sign-in screens (Windows +
-  L locks) and the update notifications.
+  time zone, taskbar, desktop icons, updates, sign-in); `account` the
+  sign-in account and its password (`/etc/shadow`); `updstat` the OmniOS
+  Update status shared by the updater, Settings and the desktop; `netinfo`
+  the network status (address, gateway, DNS, traffic) for the taskbar and
+  Settings; `desktop` the `omnios-desktop` executable.
 - **`os/apps/`** — bundled applications each running as its own client
   process: `omnios-term` (a real shell on a pseudo-terminal, shown through
   the VT100-subset emulator in `vt.c`), `omnios-files`, `omnios-calc`,
   `omnios-edit`, `omnios-sysinfo`, `omnios-about`, `omnios-settings` (the
-  Windows 11-style Settings app: System, Personalization, Apps, Accounts,
-  Time & language, OmniOS Update), and `omnios-store`, the App Store, which
+  Windows 11-style Settings app: System, Network & internet,
+  Personalization, Apps, Accounts, Time & language, OmniOS Update), and
+  `omnios-store`, the App Store, which
   installs and removes apps from the Start menu — including the ones that
   only come from the store: `omnios-clock`, `omnios-snake`,
   `omnios-taskmgr` (Task Manager), `omnios-calendar`, `omnios-mines`
@@ -122,6 +123,31 @@ musl, and lives in `os/`:
 The GUI model mirrors a real desktop: one display server owns /dev/fb0, and
 every application is a separate process that draws into its window over the
 socket, receiving keyboard/mouse focus from the server.
+
+The desktop follows Windows 11:
+
+- **Taskbar**: Start, Search and pinned apps (File Manager, Terminal, App
+  Store, Settings) centred, or on the left (Settings > Personalization);
+  other open apps join them. A dash marks open apps, a longer accent dash
+  the focused one; an app's windows share one icon (click cycles through
+  them), and a right-click offers a new window or **Close window**. The
+  tray has OmniOS Update, the network icon (Quick Settings) and the clock
+  (calendar).
+- **Start**: type to search apps, Settings pages and App Store apps; a
+  pinned grid of the installed apps; **Recommended** (update status,
+  network, more apps, personalize); the account (settings, lock) and power
+  (Lock, Restart or **Update and restart**, Shut down).
+- **Quick Settings**: Ethernet, automatic updates, 24-hour clock, desktop
+  icons, centred taskbar, next wallpaper; the IP address and update
+  status; lock, Settings and power.
+- **Desktop icons** (This PC, Terminal, App Store, Settings): double-click
+  or Enter opens them; right-click the desktop for Personalize, Display
+  settings and Open in Terminal.
+- **Sign-in and lock screens**: the account at the bottom left, network and
+  power (Restart, Shut down) at the bottom right.
+- **Keys**: Windows opens Start; Windows + L locks, + A Quick Settings,
+  + N calendar, + I Settings, + E File Manager, + D shows the desktop,
+  + S search, + X quick links.
 
 ## Build (in order)
 
@@ -197,9 +223,12 @@ Like Windows Update, OmniOS keeps itself up to date:
   default), a newer release is downloaded in the background and checked
   against the size and SHA-256. Off, you get an "update available"
   notification and a **Download & install** button instead.
+- **Pause updates** stops the automatic checks for a week at a time (up to
+  five weeks); **Resume updates** checks straight away.
 - The download is loaded with `kexec_file_load()` (`CONFIG_KEXEC_FILE`). A
-  notification, an amber dot on the update icon in the taskbar and on
-  **Restart** in Start say it is ready; restarting boots straight into the
+  notification, an amber dot on the update icon in the taskbar and on the
+  power button in Start (**Update and restart**) say it is ready;
+  restarting boots straight into the
   new version (`reboot(RB_KEXEC)`) instead of going back through the
   firmware. The settings, installed apps, password and update history
   travel along in a small initramfs, so the new version starts where the old
