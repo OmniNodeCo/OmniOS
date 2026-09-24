@@ -4,9 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to publish (blank = whatever the latest build produced)'
+        description: 'Version to publish (blank = version.txt)'
         required: false
         default: ''
+  # Pushing a version tag (e.g. v2026.2) publishes that release as well.
+  push:
+    tags: ['v*']
 
 permissions:
   contents: write
@@ -35,10 +38,23 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          # Via env, never pasted into the script: tag names may contain $(...).
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
         run: |
-          v="${{ github.event.inputs.version }}"
+          file="$(tr -d '[:space:]' < version.txt)"
+          v="$INPUT_VERSION"
+          if [ -z "$v" ] && [ "$REF_TYPE" = tag ]; then v="$REF_NAME"; fi
           v="${v#v}"
-          if [ -z "$v" ]; then v="$(tr -d '[:space:]' < version.txt)"; fi
+          [ -n "$v" ] || v="$file"
+          # The ISO name, its volume label and the OS's own version strings
+          # all come from version.txt: never publish them under another tag.
+          if [ "$v" != "$file" ]; then
+              echo "::error::release version '$v' does not match version.txt ('$file')"
+              exit 1
+          fi
           echo "version=${v}" >> "$GITHUB_OUTPUT"
           echo "tag=v${v}" >> "$GITHUB_OUTPUT"
 
