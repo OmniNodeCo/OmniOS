@@ -83,6 +83,12 @@ int  th_text_clip(struct raster *r, const char *s, int x, int y, uint32_t rgb,
  * 14 px advance. Returns the width. */
 int  th_text2x(struct raster *r, const char *s, int x, int y, uint32_t rgb);
 int  th_text2x_width(const char *s);
+/* big smooth text: the 8x8 font upscaled with repeated Scale2x to twice
+ * `scale` (2, 4 or 8), then box-filtered down for anti-aliased edges.
+ * Glyphs advance 7*scale px. Returns the width drawn. */
+int  th_text_big(struct raster *r, const char *s, int x, int y, int scale,
+                 uint32_t rgb);
+int  th_text_big_width(const char *s, int scale);
 
 /* ---- artwork ---------------------------------------------------------- */
 /* the modern wallpaper, rendered once into w x h pixels */

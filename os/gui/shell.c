@@ -68,6 +68,8 @@
 #define HV_ROW       100        /* + Start menu row                      */
 #define HV_RESTART   200
 #define HV_SHUTDOWN  201
+#define HV_USER      202        /* the account in the Start footer: lock */
+#define KEY_L        38
 #define HV_CAPTION   1000       /* + window id * 16 + chrome zone        */
 
 #define KEY_LEFTMETA  125       /* the Windows keys                      */
@@ -89,6 +91,14 @@ static int              g_set_wall = -1;     /* wallpaper style rendered    */
 static time_t           g_set_mtime;         /* settings file last seen     */
 static off_t            g_set_size = -1;
 static char             g_user[40] = "root"; /* account shown in Start      */
+/* lock / sign-in screen */
+static int              g_locked;            /* the lock screen is up       */
+static int              g_lock_stage;        /* 0 = clock, 1 = sign in      */
+static char             g_pw[64];            /* password being typed        */
+static int              g_pw_bad;            /* last attempt was wrong      */
+static uint32_t        *g_lockbg, *g_signbg; /* dimmed / frosted wallpaper  */
+static int              g_lockbg_wall = -1;
+static int              g_meta_held, g_meta_used;    /* Windows key chords  */
 static int g_full_present;          /* next present rewrites every pixel   */
 static int g_px, g_py;              /* pointer (mouse) position            */
 static int g_menu_open;             /* Start menu visible                  */
@@ -526,7 +536,7 @@ static struct menu_geom menu_geom(void)
     return g;
 }
 
-/* what the point is over: HV_ROW + i, HV_RESTART, HV_SHUTDOWN,
+/* what the point is over: HV_ROW + i, HV_RESTART, HV_SHUTDOWN, HV_USER,
  * HV_PANEL (elsewhere on the menu), or 0 (outside) */
 static int menu_hit(int x, int y)
 {
@@ -545,6 +555,8 @@ static int menu_hit(int x, int y)
             return HV_RESTART;
         if (x >= g.shutdown_x && x < g.shutdown_x + PILL_W)
             return HV_SHUTDOWN;
+        if (x >= g.x + 10 && x < g.restart_x - 8)
+            return HV_USER;
     }
     return HV_PANEL;
 }
@@ -600,6 +612,8 @@ static void draw_menu(void)
 
     /* footer: the user, Restart, Shut down */
     th_fill_a(r, g.x + 16, g.foot_y, g.w - 32, 1, 0xffffff, 22);
+    if (g_hover == HV_USER)
+        th_round_rect(r, g.x + 10, g.pill_y, g.restart_x - g.x - 18, PILL_H, 6, 0xffffff, 26);
     th_icon(r, g.x + 16, g.foot_y + 15, 26, TH_ACCENT, 'u');
     th_text(r, g_user, g.x + 50, g.foot_y + 24, TH_TEXT_LIGHT);
     draw_pill(r, g.restart_x, g.pill_y, "Restart", g_hover == HV_RESTART);
@@ -657,9 +671,195 @@ static void shell_draw_background(struct omni_wm *wm)
 }
 
 /* after the windows: always-on-top chrome, then present the frame */
+/* ------------------------------------------------------------------ */
+/* lock + sign-in screen                                              */
+/* ------------------------------------------------------------------ */
+
+/* dimmed wallpaper (lock) and frosted wallpaper (sign in), cached per style */
+static void lock_backgrounds(void)
+{
+    size_t n = (size_t)g_dev.w * (size_t)g_dev.h, i;
+    struct raster fr;
+    if (g_lockbg_wall == g_set_wall && g_lockbg && g_signbg)
+        return;
+    if (!g_lockbg)
+        g_lockbg = malloc(n * sizeof(uint32_t));
+    if (!g_signbg)
+        g_signbg = malloc(n * sizeof(uint32_t));
+    if (!g_lockbg || !g_signbg || !g_wall)
+        return;
+    for (i = 0; i < n; i++)
+        g_lockbg[i] = th_blend(g_wall[i], 0x000000, 70);
+    memcpy(g_signbg, g_wall, n * sizeof(uint32_t));
+    raster_init(&fr, g_signbg, g_dev.w, g_dev.h, g_dev.w);
+    th_frost(&fr, 0, 0, g_dev.w, g_dev.h, 0, 14);
+    for (i = 0; i < n; i++)
+        g_signbg[i] = th_blend(g_signbg[i], 0x000000, 100);
+    g_lockbg_wall = g_set_wall;
+}
+
+static void shell_lock(void)
+{
+    g_locked = 1;
+    g_lock_stage = 0;
+    g_pw_bad = 0;
+    memset(g_pw, 0, sizeof(g_pw));
+    g_menu_open = 0;
+    lock_backgrounds();
+    g_wm.dirty = 1;
+}
+
+static void shell_unlock(void)
+{
+    g_locked = 0;
+    memset(g_pw, 0, sizeof(g_pw));
+    g_wm.dirty = 1;
+}
+
+static void text_center(struct raster *r, const char *s, int y, uint32_t rgb)
+{
+    th_text(r, s, (r->w - (int)strlen(s) * 8) / 2, y, rgb);
+}
+
+/* geometry of the sign-in controls */
+static void signin_geom(int *cy, int *bx, int *by, int *bw, int *bh)
+{
+    *cy = g_screen.h * 26 / 100;
+    *bw = omni_account_has_password() ? 300 : 160;
+    *bh = 40;
+    *bx = (g_screen.w - *bw) / 2;
+    *by = *cy + 176;
+}
+
+static void draw_lock(void)
+{
+    struct raster *r = &g_screen;
+    time_t t = time(NULL);
+    struct tm tmv;
+    char buf[64];
+
+    localtime_r(&t, &tmv);
+    if (g_lock_stage == 0) {                     /* the clock */
+        int ty = r->h * 15 / 100, tw;
+        if (g_lockbg)
+            memcpy(r->bits, g_lockbg, (size_t)r->w * (size_t)r->h * sizeof(uint32_t));
+        if (g_set.clock24)
+            snprintf(buf, sizeof(buf), "%02d:%02d", tmv.tm_hour, tmv.tm_min);
+        else
+            snprintf(buf, sizeof(buf), "%d:%02d", tmv.tm_hour % 12 ? tmv.tm_hour % 12 : 12, tmv.tm_min);
+        tw = th_text_big_width(buf, 8);
+        th_text_big(r, buf, (r->w - tw) / 2 + 2, ty + 2, 8, 0x000000);   /* soft shadow */
+        th_text_big(r, buf, (r->w - tw) / 2, ty, 8, 0xffffff);
+        strftime(buf, sizeof(buf), "%A, %B %d", &tmv);
+        tw = th_text2x_width(buf);
+        th_text2x(r, buf, (r->w - tw) / 2, ty + 84, 0xf1f5f9);
+        th_icon(r, r->w / 2 - 14, r->h - 118, 28, 0xf59e0b, 'k');
+        text_center(r, "Press a key or click to sign in", r->h - 72, 0xe2e8f0);
+    } else {                                     /* sign in */
+        int cy, bx, by, bw, bh, nw;
+        const char *name = omni_account_display();
+        if (g_signbg)
+            memcpy(r->bits, g_signbg, (size_t)r->w * (size_t)r->h * sizeof(uint32_t));
+        signin_geom(&cy, &bx, &by, &bw, &bh);
+        th_icon(r, r->w / 2 - 60, cy, 120, TH_ACCENT, 'u');
+        nw = th_text2x_width(name);
+        th_text2x(r, name, (r->w - nw) / 2, cy + 138, 0xffffff);
+        if (omni_account_has_password()) {
+            int i, n = (int)strlen(g_pw);
+            th_round_rect(r, bx - 1, by - 1, bw + 2, bh + 2, 9, 0xffffff, 90);
+            th_round_rect(r, bx, by, bw, bh, 8, 0xffffff, 238);
+            if (n == 0)
+                th_text(r, "Password", bx + 16, by + 16, 0x6b7280);
+            for (i = 0; i < n && i < 17; i++)
+                th_round_rect(r, bx + 16 + i * 14, by + 16, 8, 8, 4, 0x1f2937, 255);
+            if (n < 17)
+                th_fill_a(r, bx + 16 + n * 14, by + 11, 2, 18, 0x1f2937, 255);
+            th_round_rect(r, bx + bw - 36, by + 4, 32, 32, 6, TH_ACCENT, 255);
+            th_text_bold(r, ">", bx + bw - 24, by + 16, 0xffffff);
+            if (g_pw_bad)
+                text_center(r, "The password is incorrect. Try again.", by + bh + 20, 0xfecaca);
+            else
+                text_center(r, "Enter your password, then press Enter", by + bh + 20, 0xcbd5e1);
+        } else {
+            th_round_rect(r, bx, by, bw, bh, 8, TH_ACCENT, 255);
+            th_text(r, "Sign in", bx + (bw - 7 * 8) / 2, by + 16, 0xffffff);
+        }
+        text_center(r, "Esc: back to the lock screen", r->h - 48, 0x94a3b8);
+    }
+}
+
+static void signin_submit(void)
+{
+    if (!omni_account_has_password() || omni_account_check(g_pw)) {
+        shell_unlock();
+        return;
+    }
+    g_pw_bad = 1;
+    memset(g_pw, 0, sizeof(g_pw));
+}
+
+/* a key while locked; returns 1 if the screen changed */
+static int lock_key(int code, int pressed, char text)
+{
+    size_t n = strlen(g_pw);
+    if (!pressed)
+        return 0;
+    if (g_lock_stage == 0) {
+        g_lock_stage = 1;
+        g_pw_bad = 0;
+        return 1;
+    }
+    switch (code) {
+    case OMNI_KEY_ESC:
+        g_lock_stage = 0;
+        memset(g_pw, 0, sizeof(g_pw));
+        return 1;
+    case OMNI_KEY_ENTER: case OMNI_KEY_KPENTER:
+        signin_submit();
+        return 1;
+    case OMNI_KEY_BACKSPACE:
+        if (n)
+            g_pw[n - 1] = '\0';
+        return 1;
+    default:
+        if (text >= 32 && text < 127 && n + 1 < sizeof(g_pw) && omni_account_has_password()) {
+            g_pw[n] = text;
+            g_pw[n + 1] = '\0';
+            g_pw_bad = 0;
+            return 1;
+        }
+        if (code == OMNI_KEY_SPACE && !omni_account_has_password())
+            signin_submit();
+        return 1;
+    }
+}
+
+/* a click while locked */
+static int lock_button(int x, int y)
+{
+    int cy, bx, by, bw, bh;
+    if (g_lock_stage == 0) {
+        g_lock_stage = 1;
+        return 1;
+    }
+    signin_geom(&cy, &bx, &by, &bw, &bh);
+    if (omni_account_has_password()) {
+        if (x >= bx + bw - 36 && x < bx + bw && y >= by && y < by + bh)
+            signin_submit();                     /* the arrow */
+    } else if (x >= bx && x < bx + bw && y >= by && y < by + bh) {
+        signin_submit();
+    }
+    return 1;
+}
+
 static void shell_finish(struct omni_wm *wm)
 {
     (void)wm;
+    if (g_locked) {
+        draw_lock();
+        present_scene();
+        return;
+    }
     draw_taskbar();
     if (g_menu_open)
         draw_menu();
@@ -698,6 +898,8 @@ static int hover_key(void)
 {
     struct omni_win *w;
 
+    if (g_locked)
+        return 0;
     if (g_menu_open) {
         int k = menu_hit(g_px, g_py);
         if (k)
@@ -746,6 +948,9 @@ static int shell_button(int x, int y)
         } else if (k == HV_RESTART || k == HV_SHUTDOWN) {
             close_menu();
             power(k == HV_RESTART);
+        } else if (k == HV_USER) {
+            close_menu();
+            shell_lock();
         } else if (k != HV_PANEL) {
             close_menu();       /* a click elsewhere (or on Start) closes */
         }
@@ -784,12 +989,24 @@ static int shell_key(int code, int pressed)
     int rows;
 
     if (code == KEY_LEFTMETA || code == KEY_RIGHTMETA) {
-        if (pressed == 1) {
-            if (g_menu_open)
-                close_menu();
-            else
-                open_menu();
+        if (pressed == 1) {                     /* Start opens on release, */
+            g_meta_held = 1;                    /* unless it was a chord   */
+            g_meta_used = 0;
+        } else if (pressed == 0) {
+            if (g_meta_held && !g_meta_used) {
+                if (g_menu_open)
+                    close_menu();
+                else
+                    open_menu();
+            }
+            g_meta_held = 0;
         }
+        return 1;
+    }
+    if (g_meta_held && pressed) {               /* Windows + key */
+        g_meta_used = 1;
+        if (code == KEY_L)
+            shell_lock();
         return 1;
     }
     if (!g_menu_open)
@@ -880,6 +1097,8 @@ void omni_shell_open_initial_windows(void)
     w = omni_wm_add(&g_wm, "Welcome to OmniOS", x, y, ww, wh);
     if (w)
         welcome_paint(&w->surface);
+    if (g_set.signin)
+        shell_lock();                           /* sign in first */
 }
 
 /* ------------------------------------------------------------------ */
@@ -1096,15 +1315,22 @@ void omni_shell_run(void)
                     omni_shell_warp(e.dx, e.dy);
                 else
                     omni_shell_moveto(e.dx, e.dy);
-                omni_wm_motion(&g_wm, g_px, g_py);  /* drags mark dirty */
+                if (!g_locked)
+                    omni_wm_motion(&g_wm, g_px, g_py);  /* drags mark dirty */
                 moved = 1;
             } else if (e.type == 3) {                 /* button */
-                if (e.pressed && shell_button(g_px, g_py))
+                if (g_locked) {
+                    if (e.pressed && lock_button(g_px, g_py))
+                        need = 1;
+                } else if (e.pressed && shell_button(g_px, g_py))
                     need = 1;
                 else
                     omni_wm_button(&g_wm, g_px, g_py, e.key, e.pressed);
             } else if (e.type == 1) {                 /* key */
-                if (shell_key(e.key, e.pressed))
+                if (g_locked) {
+                    if (lock_key(e.key, e.pressed, e.text))
+                        need = 1;
+                } else if (shell_key(e.key, e.pressed))
                     need = 1;
                 else if (e.pressed && g_wm.active)
                     omni_wm_key(&g_wm, e.key, e.pressed, e.text);

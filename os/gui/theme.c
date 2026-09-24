@@ -377,6 +377,81 @@ static void glyph2x(struct raster *r, uint32_t ch, int x, int y, uint32_t c)
 #undef SP
 }
 
+/* one Scale2x (EPX) pass over a 0/1 bitmap: w x h -> 2w x 2h */
+static unsigned char *scale2x_bits(const unsigned char *a, int w, int h)
+{
+    unsigned char *b = malloc((size_t)w * (size_t)h * 4);
+    int x, y;
+#define AT(xx, yy) (((xx) < 0 || (yy) < 0 || (xx) >= w || (yy) >= h) ? 0 : a[(yy) * w + (xx)])
+    if (!b)
+        return NULL;
+    for (y = 0; y < h; y++)
+        for (x = 0; x < w; x++) {
+            int P = AT(x, y), A = AT(x, y - 1), B = AT(x + 1, y), C = AT(x - 1, y), D = AT(x, y + 1);
+            unsigned char *o = &b[(2 * y) * (2 * w) + 2 * x];
+            o[0]         = (unsigned char)((C == A && C != D && A != B) ? A : P);
+            o[1]         = (unsigned char)((A == B && A != C && B != D) ? B : P);
+            o[2 * w]     = (unsigned char)((D == C && D != B && C != A) ? C : P);
+            o[2 * w + 1] = (unsigned char)((B == D && B != A && D != C) ? D : P);
+        }
+#undef AT
+    return b;
+}
+
+int th_text_big_width(const char *s, int scale)
+{
+    const char *p = s;
+    int n = 0;
+    while (*p) {
+        omni_utf8_next(&p);
+        n++;
+    }
+    return n * 7 * scale;
+}
+
+int th_text_big(struct raster *r, const char *s, int x, int y, int scale, uint32_t rgb)
+{
+    const char *p = s;
+    uint32_t chs[48];
+    unsigned char *a;
+    int n = 0, w, h = 8, i, j, k, passes = 0;
+
+    while (*p && n < 48)
+        chs[n++] = omni_utf8_next(&p);
+    if (n == 0 || scale < 2)
+        return 0;
+    w = n * 7 + 1;
+    a = calloc((size_t)w * (size_t)h, 1);
+    if (!a)
+        return 0;
+    for (i = 0; i < n; i++) {
+        const unsigned char *g = omni_glyph8(chs[i]);
+        for (j = 0; j < 8; j++)
+            for (k = 0; k < 8; k++)
+                if ((g[j] >> k) & 1)
+                    a[j * w + i * 7 + k] = 1;
+    }
+    for (k = 2 * scale; k > 1; k >>= 1) {          /* upscale to 2x the target */
+        unsigned char *b = scale2x_bits(a, w, h);
+        free(a);
+        if (!b)
+            return 0;
+        a = b;
+        w *= 2;
+        h *= 2;
+        passes++;
+    }
+    for (j = 0; j + 1 < h; j += 2)                  /* 2x2 box filter = AA */
+        for (i = 0; i + 1 < w; i += 2) {
+            int cov = a[j * w + i] + a[j * w + i + 1] + a[(j + 1) * w + i] + a[(j + 1) * w + i + 1];
+            if (cov)
+                th_px(r, x + i / 2, y + j / 2, rgb, (unsigned)(cov * 255 / 4));
+        }
+    free(a);
+    (void)passes;
+    return n * 7 * scale;
+}
+
 int th_text2x(struct raster *r, const char *s, int x, int y, uint32_t rgb)
 {
     const char *p = s;
