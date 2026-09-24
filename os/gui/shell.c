@@ -53,7 +53,7 @@
 #define TB_BTN_MIN   44         /* ... narrowest (icon only)             */
 #define TB_GAP       4
 #define TB_TRAY_W    112        /* clock                                 */
-#define MENU_W       340
+#define MENU_W       384
 #define MENU_HEAD_H  76
 #define MENU_ROW_H   36
 #define MENU_ROW_MIN 26          /* rows shrink to this before apps drop */
@@ -792,7 +792,8 @@ static void draw_menu(void)
     if (g_hover == HV_USER)
         th_round_rect(r, g.x + 10, g.pill_y, g.restart_x - g.x - 18, PILL_H, 6, 0xffffff, 26);
     th_icon(r, g.x + 16, g.foot_y + 15, 26, TH_ACCENT, 'u');
-    th_text(r, g_user, g.x + 50, g.foot_y + 24, TH_TEXT_LIGHT);
+    th_text_clip(r, g_user, g.x + 50, g.foot_y + 24, TH_TEXT_LIGHT,
+                 g.restart_x - 10 - (g.x + 50));
     draw_pill(r, g.restart_x, g.pill_y, "Restart", g_hover == HV_RESTART);
     if (upd_ready())                        /* restarting installs the update */
         th_round_rect(r, g.restart_x + PILL_W - 13, g.pill_y + 4, 8, 8, 4, UPD_BADGE, 255);

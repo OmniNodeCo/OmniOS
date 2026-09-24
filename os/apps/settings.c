@@ -372,7 +372,7 @@ static void page_apps(struct app *a)
         omni_client_textt(c, CARD_X + 54, y + 46 + rows * 34 + 4, C_DIM, s);
     }
     y += 50 + rows * 34 + (n > rows ? 20 : 0) + 12;
-    row_card(a, y, 64, "Get more apps", "Games, tools and utilities from the App Store");
+    row_card(a, y, 64, "Get more apps", "Games and tools from the App Store");
     button(a, CARD_X + cw - 18 - 150, y + 17, 150, "Open App Store", 1, B_STORE);
 }
 

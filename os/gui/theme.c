@@ -425,7 +425,10 @@ int th_text_big(struct raster *r, const char *s, int x, int y, int scale, uint32
     if (!a)
         return 0;
     for (i = 0; i < n; i++) {
-        const unsigned char *g = omni_glyph8(chs[i]);
+        /* large text: a plain oval zero (the 8x8 font slashes it, which
+         * helps small text but looks odd on the lock-screen clock) */
+        static const unsigned char zero[8] = { 0x1E, 0x33, 0x33, 0x33, 0x33, 0x33, 0x1E, 0x00 };
+        const unsigned char *g = chs[i] == '0' ? zero : omni_glyph8(chs[i]);
         for (j = 0; j < 8; j++)
             for (k = 0; k < 8; k++)
                 if ((g[j] >> k) & 1)
