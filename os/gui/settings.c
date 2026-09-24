@@ -69,6 +69,7 @@ void omni_settings_defaults(struct omni_settings *s)
     memset(s, 0, sizeof(*s));
     s->autoupdate = 1;
     s->signin = 1;
+    s->desktop_icons = 1;
 }
 
 static int find_name(const char *v, int n, const char *(*name_at)(int))
@@ -112,6 +113,12 @@ int omni_settings_load(struct omni_settings *s)
             s->autoupdate = atoi(v) != 0;
         } else if (strcmp(line, "signin") == 0) {
             s->signin = atoi(v) != 0;
+        } else if (strcmp(line, "taskbar") == 0) {
+            s->taskbar_left = strcmp(v, "left") == 0;
+        } else if (strcmp(line, "desktopicons") == 0) {
+            s->desktop_icons = atoi(v) != 0;
+        } else if (strcmp(line, "pause_until") == 0) {
+            s->pause_until = atol(v);
         }
     }
     fclose(f);
@@ -142,6 +149,10 @@ int omni_settings_save(const struct omni_settings *s)
     fprintf(f, "clock24=%d\n", s->clock24 ? 1 : 0);
     fprintf(f, "autoupdate=%d\n", s->autoupdate ? 1 : 0);
     fprintf(f, "signin=%d\n", s->signin ? 1 : 0);
+    fprintf(f, "taskbar=%s\n", s->taskbar_left ? "left" : "center");
+    fprintf(f, "desktopicons=%d\n", s->desktop_icons ? 1 : 0);
+    if (s->pause_until > time(NULL))
+        fprintf(f, "pause_until=%ld\n", s->pause_until);
     if (fclose(f) != 0 || rename(tmp, path) != 0) {
         unlink(tmp);
         return -1;
@@ -153,4 +164,9 @@ void omni_settings_apply_tz(const struct omni_settings *s)
 {
     setenv("TZ", omni_zones[(s->zone >= 0 && s->zone < omni_zones_n) ? s->zone : 0].tz, 1);
     tzset();
+}
+
+int omni_updates_paused(const struct omni_settings *s)
+{
+    return s->pause_until > (long)time(NULL);
 }

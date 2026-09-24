@@ -21,7 +21,13 @@ struct omni_settings {
     int zone;               /* index into omni_zones[]                     */
     int autoupdate;         /* install updates automatically               */
     int signin;             /* show the sign-in screen at startup          */
+    int taskbar_left;       /* taskbar icons on the left, not centred       */
+    int desktop_icons;      /* This PC, Terminal... on the desktop          */
+    long pause_until;       /* no automatic updates before this time (0)    */
 };
+
+#define OMNI_PAUSE_STEP  (7L * 86400)     /* "Pause for 1 week"             */
+#define OMNI_PAUSE_MAX   (35L * 86400)    /* at most 5 weeks, like Windows  */
 
 struct omni_accent  { const char *name; uint32_t rgb; };
 struct omni_zone    { const char *name; const char *tz; };   /* POSIX TZ rule */
@@ -42,5 +48,7 @@ int  omni_settings_load(struct omni_settings *s);
 int  omni_settings_save(const struct omni_settings *s);
 /* apply the time zone to this process (and the children it starts) */
 void omni_settings_apply_tz(const struct omni_settings *s);
+/* 1 while automatic updates are paused */
+int  omni_updates_paused(const struct omni_settings *s);
 
 #endif /* OMNI_OS_GUI_SETTINGS_H */

@@ -14,6 +14,8 @@
  *
  * With "Get updates automatically" on (Settings > OmniOS Update, the
  * default), a check that finds a newer release downloads it straight away.
+ * "Pause updates" stops the automatic checks for a week at a time (up to
+ * five), as on Windows; a check asked for by hand still runs.
  * Every release publishes omnios-update.txt next to its ISO:
  *
  *     version=2026.2.3
@@ -269,6 +271,14 @@ static int auto_updates(void)
     struct omni_settings s;
     omni_settings_load(&s);
     return s.autoupdate;
+}
+
+/* seconds left in a "Pause updates" (Settings), 0 when not paused */
+static long paused_for(void)
+{
+    struct omni_settings s;
+    omni_settings_load(&s);
+    return omni_updates_paused(&s) ? s.pause_until - (long)time(NULL) : 0;
 }
 
 /* a default route means the network is up (DHCP finished) */
@@ -835,6 +845,13 @@ static void run_daemon(void)
     }
     nap(waited >= FIRST_DELAY ? 5 : FIRST_DELAY);
     for (;;) {
+        long pause = paused_for();
+        if (pause > 0) {
+            /* paused (Settings > OmniOS Update): no checks, no downloads
+             * until the pause ends; "Resume updates" checks right away */
+            nap(pause < 600 ? (int)pause : 600);
+            continue;
+        }
         /* like Windows: always check; download on our own only with
          * automatic updates on, else just say an update is available */
         run(0);
