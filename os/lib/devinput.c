@@ -28,6 +28,8 @@
 #include <unistd.h>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
 #include <linux/input.h>
 
 #include "omni.h"
@@ -258,6 +260,37 @@ static int read_tty(struct omni_devs *d, int fd)
 /* device set                                                         */
 /* ------------------------------------------------------------------ */
 
+/* Safety net for an incomplete /dev: recreate a missing character-device
+ * node from the "major:minor" that sysfs publishes for it. With a healthy
+ * devtmpfs /dev every node exists already and this does nothing.
+ * Returns 1 if the node was created, 0 if it existed, -1 otherwise. */
+static int node_from_sysfs(const char *node, const char *sysdev)
+{
+    char buf[32];
+    unsigned maj, min;
+    struct stat st;
+    ssize_t n;
+    int fd;
+
+    if (stat(node, &st) == 0)
+        return 0;
+    fd = open(sysdev, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return -1;                          /* the device does not exist */
+    n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n <= 0)
+        return -1;
+    buf[n] = '\0';
+    if (sscanf(buf, "%u:%u", &maj, &min) != 2)
+        return -1;
+    if (strncmp(node, "/dev/input/", 11) == 0)
+        mkdir("/dev/input", 0755);
+    if (mknod(node, S_IFCHR | 0600, makedev(maj, min)) != 0)
+        return -1;
+    return 1;
+}
+
 #define OMNI_LONG_BITS  (8 * (int)sizeof(unsigned long))
 #define OMNI_NLONGS(n)  (((n) + OMNI_LONG_BITS - 1) / OMNI_LONG_BITS)
 
@@ -336,10 +369,15 @@ void omni_devs_rescan(struct omni_devs *d)
     d->ev_n = 0;
     d->ev_has_rel = d->ev_has_abs = d->ev_has_kbd = 0;
 
+    d->ev_created = 0;
     for (i = 0; i < OMNI_EV_MAX; i++) {
+        char sys[64];
         int fd;
 
         snprintf(path, sizeof(path), "/dev/input/event%d", i);
+        snprintf(sys, sizeof(sys), "/sys/class/input/event%d/dev", i);
+        if (node_from_sysfs(path, sys) > 0)
+            d->ev_created++;
         fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (fd < 0)
             continue;
@@ -360,6 +398,8 @@ void omni_devs_rescan(struct omni_devs *d)
             d->mice_fd = -1;
         }
     } else if (d->mice_fd < 0) {
+        if (node_from_sysfs("/dev/input/mice", "/sys/class/input/mice/dev") > 0)
+            d->ev_created++;
         d->mice_fd = open("/dev/input/mice", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (d->mice_fd < 0)
             d->mice_fd = -1;
@@ -467,6 +507,9 @@ int omni_devs_drain(struct omni_devs *d, int idx)
 void omni_console_puts(const char *s)
 {
     int fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+    if (fd < 0 && errno == ENOENT &&
+        node_from_sysfs("/dev/kmsg", "/sys/class/mem/kmsg/dev") > 0)
+        fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
     if (fd < 0)
         fd = open("/dev/console", O_WRONLY | O_NOCTTY | O_CLOEXEC);
     if (fd < 0)
@@ -489,6 +532,12 @@ void omni_devs_log(struct omni_devs *d)
              "desktop: input: evdev=%d pointer=%s keyboard=%s\n",
              d->ev_n, ptr, kbd);
     omni_console_puts(line);
+    if (d->ev_created > 0) {
+        snprintf(line, sizeof(line),
+                 "desktop: input: WARN /dev was incomplete: created %d "
+                 "input node(s) from sysfs\n", d->ev_created);
+        omni_console_puts(line);
+    }
 
     for (i = 0; i < d->ev_n; i++) {
         char name[64];

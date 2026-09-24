@@ -150,6 +150,7 @@ struct omni_devs {
     int ev_has_rel;
     int ev_has_abs;
     int ev_has_kbd;
+    int ev_created;            /* nodes recreated from sysfs (last scan) */
 };
 
 /* Write "desktop: input ..." lines describing every source (names,
