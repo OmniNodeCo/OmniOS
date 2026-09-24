@@ -66,6 +66,17 @@ stage_fetch() {
             warn "  kernel patch not applied (already applied?)"
         fi
     )
+    # BusyBox's TLS P-256 fix: without it, wget cannot talk to GitHub
+    # (OmniOS Update); see the patch header
+    (
+        cd "$SRC/busybox"
+        if git apply --check "$ROOT/patches/busybox-tls-p256.patch" 2>/dev/null; then
+            git apply "$ROOT/patches/busybox-tls-p256.patch"
+            log "  applied patches/busybox-tls-p256.patch"
+        else
+            warn "  busybox TLS patch not applied (already applied?)"
+        fi
+    )
 }
 
 stage_toolchain() {
