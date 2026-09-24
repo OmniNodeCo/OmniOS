@@ -43,9 +43,15 @@ jobs:
             flex bison mtools xorriso isolinux xz-utils zstd git \
             ca-certificates libc6-dev linux-libc-dev ccache
           python3 -m pip install --user --break-system-packages pycdlib
-          # ccache's gcc/cc wrappers first on PATH for all later steps
-          test -x /usr/lib/ccache/gcc
-          echo /usr/lib/ccache >> "$GITHUB_PATH"
+          # ccache's gcc/cc wrappers first on PATH for all later steps.
+          # (The package generates them in postinst; regenerate if absent,
+          # and never fail the build over the cache.)
+          [ -x /usr/lib/ccache/gcc ] || sudo update-ccache-symlinks || true
+          if [ -x /usr/lib/ccache/gcc ]; then
+              echo /usr/lib/ccache >> "$GITHUB_PATH"
+          else
+              echo "::warning::ccache wrappers missing; building without the compiler cache"
+          fi
 
       - name: Fetch upstream sources
         run: scripts/build.sh fetch
@@ -71,7 +77,7 @@ jobs:
                   for p in bc musl busybox microwindows linux; do
                       echo "$p $(git -C "src/$p" rev-parse HEAD)"
                   done
-                  gcc -dumpfullversion
+                  CCACHE_DISABLE=1 gcc -dumpfullversion
                   echo "$GITHUB_WORKSPACE"
                 } | sha256sum | cut -c1-20 )
           echo "image=$image" >> "$GITHUB_OUTPUT"
@@ -100,10 +106,11 @@ jobs:
           key: ${{ steps.keys.outputs.userspace }}
 
       - name: Prepare compiler cache
+        continue-on-error: true   # caching must never fail a build
         run: |
           ccache --version | head -n 1
           ccache --zero-stats
-          ccache --show-config | grep -E ' (cache_dir|max_size|base_dir) = '
+          ccache --show-config | grep -E ' (cache_dir|max_size|base_dir) = ' || true
           if [ "$(command -v gcc)" != /usr/lib/ccache/gcc ]; then
               echo "::warning::gcc resolves to $(command -v gcc), not ccache"
           fi
@@ -112,6 +119,7 @@ jobs:
         run: scripts/build.sh userspace
 
       - name: Save prebuilt userspace
+        continue-on-error: true   # caching must never fail a build
         if: steps.userspace-restore.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
@@ -151,6 +159,7 @@ jobs:
       # Runs that only touched a few OmniOS source files skip the save and
       # the next run restores the same (still valid) cache.
       - name: Compiler cache statistics
+        continue-on-error: true   # caching must never fail a build
         id: ccache-stats
         if: ${{ !cancelled() }}
         env:
@@ -192,6 +201,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Save compiler cache
+        continue-on-error: true   # caching must never fail a build
         if: ${{ !cancelled() && steps.ccache-stats.outputs.save == 'true' }}
         uses: actions/cache/save@v4
         with:

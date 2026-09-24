@@ -56,7 +56,7 @@ tools/make-fat.py                  pure-Python FAT image builder for the EFI Sys
 tools/config/busybox.config        BusyBox build config
 tools/config/microwindows.config   Nano-X framebuffer build config
 patches/kernel-omnios.patch        the 3 kernel-tree edits, for reproducibility
-.github/workflows/build.yml        CI: builds kernel + ISO, uploads artifacts
+.github/workflows/build.yml        CI: builds kernel + ISO (ccache + prebuilt-userspace caches)
 .github/workflows/release.yml      publishes the ISO as a GitHub release
 .github/workflows/ci.yml           static checks (py_compile, shellcheck, C syntax)
 src/                               upstream source checkouts (git-cloned; not committed)
