@@ -54,12 +54,41 @@ static void ev_key(int code, int value)
     omni_input_push_key(code, value, ev_shift, ch);
 }
 
-static int read_ev(struct omni_devs *d, int fd)
+/* Absolute axis value -> 0..65535 using the device's own range. */
+static int abs_norm(const struct omni_devs *d, int idx, int axis)
+{
+    long long lo = d->ev_abs_min[idx][axis];
+    long long hi = d->ev_abs_max[idx][axis];
+    long long v  = d->ev_abs_cur[idx][axis];
+
+    if (hi <= lo)
+        return 0;
+    if (v < lo) v = lo;
+    if (v > hi) v = hi;
+    return (int)((v - lo) * 65535 / (hi - lo));
+}
+
+/* One-time "events are arriving" note per device: the quickest way to
+ * tell a hypervisor that routes the mouse elsewhere from a desktop bug. */
+static void note_first_event(struct omni_devs *d, int idx, const char *kind)
+{
+    char line[96];
+
+    if (d->ev_seen[idx])
+        return;
+    d->ev_seen[idx] = 1;
+    snprintf(line, sizeof(line),
+             "desktop: input: first %s event from event%d\n",
+             kind, d->ev_num[idx]);
+    omni_console_puts(line);
+}
+
+static int read_ev(struct omni_devs *d, int idx)
 {
     struct input_event ie;
     ssize_t n;
+    int fd = d->ev_fd[idx];
 
-    (void)d;
     for (;;) {
         n = read(fd, &ie, sizeof(ie));
         if (n < 0) {
@@ -72,10 +101,13 @@ static int read_ev(struct omni_devs *d, int fd)
 
         switch (ie.type) {
         case EV_KEY:
+            note_first_event(d, idx, "key/button");
             /* Mouse buttons ride the EV_KEY event type on evdev; keep
-             * them out of the keyboard stream.  1=left 2=middle 3=right. */
+             * them out of the keyboard stream.  1=left 2=middle 3=right.
+             * BTN_TOUCH is the "click" of touchscreens and tablets. */
             switch (ie.code) {
-            case BTN_LEFT:   omni_input_push_button(1, ie.value); continue;
+            case BTN_LEFT:
+            case BTN_TOUCH:  omni_input_push_button(1, ie.value); continue;
             case BTN_MIDDLE: omni_input_push_button(2, ie.value); continue;
             case BTN_RIGHT:  omni_input_push_button(3, ie.value); continue;
             default:
@@ -85,6 +117,7 @@ static int read_ev(struct omni_devs *d, int fd)
                 ev_key(ie.code, ie.value);
             break;
         case EV_REL:
+            note_first_event(d, idx, "relative pointer");
             if (ie.code == REL_X)
                 omni_input_push_mouse(ie.value, 0);
             else if (ie.code == REL_Y)
@@ -93,6 +126,22 @@ static int read_ev(struct omni_devs *d, int fd)
                 omni_input_push_button(ie.value > 0 ? 4 : 5, 1);
             else if (ie.code == REL_HWHEEL)
                 omni_input_push_button(ie.value > 0 ? 6 : 7, 1);
+            break;
+        case EV_ABS:
+            /* Absolute pointers (VMware vmmouse, USB/virtio tablets)
+             * report only the axes that changed; remember them and emit
+             * one position per SYN_REPORT frame. */
+            if (d->ev_abs[idx] && (ie.code == ABS_X || ie.code == ABS_Y)) {
+                note_first_event(d, idx, "absolute pointer");
+                d->ev_abs_cur[idx][ie.code == ABS_Y ? 1 : 0] = ie.value;
+                d->ev_abs_dirty[idx] = 1;
+            }
+            break;
+        case EV_SYN:
+            if (ie.code == SYN_REPORT && d->ev_abs_dirty[idx]) {
+                d->ev_abs_dirty[idx] = 0;
+                omni_input_push_abs(abs_norm(d, idx, 0), abs_norm(d, idx, 1));
+            }
             break;
         default:
             break;
@@ -209,22 +258,61 @@ static int read_tty(struct omni_devs *d, int fd)
 /* device set                                                         */
 /* ------------------------------------------------------------------ */
 
-/* True if one of the already-opened evdev fds carries a capability
- * bit: type=EV_REL, bit 0 is REL_X (a pointer); type=EV_KEY, bit 30
- * is KEY_A — on every real keyboard, on no mouse (mouse buttons ride
- * EV_KEY too, so "has EV_KEY" alone is not a keyboard test). */
-static int evdev_has_bit(struct omni_devs *d, int type, int bit)
-{
-    int i;
-    unsigned long bits[1];
+#define OMNI_LONG_BITS  (8 * (int)sizeof(unsigned long))
+#define OMNI_NLONGS(n)  (((n) + OMNI_LONG_BITS - 1) / OMNI_LONG_BITS)
 
-    for (i = 0; i < d->ev_n; i++) {
-        memset(bits, 0, sizeof(bits));
-        if (ioctl(d->ev_fd[i], EVIOCGBIT(type, sizeof(bits)), bits) > 0 &&
-            (bits[0] & (1UL << bit)))
-            return 1;
+/* Does evdev device `fd` advertise capability `bit` of event `type`?
+ * The buffer covers KEY_MAX, the largest bitmap (BTN_LEFT is bit 272,
+ * so a single word is not enough for button tests). */
+static int evdev_test_bit(int fd, int type, int bit)
+{
+    unsigned long bits[OMNI_NLONGS(KEY_MAX + 1)];
+
+    memset(bits, 0, sizeof(bits));
+    if (ioctl(fd, EVIOCGBIT(type, sizeof(bits)), bits) < 0)
+        return 0;
+    return (int)((bits[bit / OMNI_LONG_BITS] >> (bit % OMNI_LONG_BITS)) & 1UL);
+}
+
+/* Classify opened device `i`:
+ *   relative pointer  REL_X                       (PS/2, USB mice)
+ *   absolute pointer  ABS_X + ABS_Y + BTN_LEFT/BTN_TOUCH
+ *                     (VMware vmmouse, USB/virtio tablets; the button
+ *                     test keeps joysticks and accelerometers out)
+ *   keyboard          KEY_A — on every real keyboard, on no mouse
+ *                     (mouse buttons ride EV_KEY too). */
+static void evdev_classify(struct omni_devs *d, int i)
+{
+    int fd = d->ev_fd[i];
+    int axis;
+
+    d->ev_rel[i] = (unsigned char)evdev_test_bit(fd, EV_REL, REL_X);
+    d->ev_kbd[i] = (unsigned char)evdev_test_bit(fd, EV_KEY, KEY_A);
+    d->ev_abs[i] = (unsigned char)(evdev_test_bit(fd, EV_ABS, ABS_X) &&
+                                   evdev_test_bit(fd, EV_ABS, ABS_Y) &&
+                                   (evdev_test_bit(fd, EV_KEY, BTN_LEFT) ||
+                                    evdev_test_bit(fd, EV_KEY, BTN_TOUCH)));
+    d->ev_seen[i] = 0;
+    d->ev_abs_dirty[i] = 0;
+
+    for (axis = 0; axis < 2; axis++) {
+        struct input_absinfo ai;
+
+        d->ev_abs_min[i][axis] = 0;
+        d->ev_abs_max[i][axis] = 0;
+        d->ev_abs_cur[i][axis] = 0;
+        if (!d->ev_abs[i])
+            continue;
+        memset(&ai, 0, sizeof(ai));
+        if (ioctl(fd, EVIOCGABS(axis == 0 ? ABS_X : ABS_Y), &ai) < 0 ||
+            ai.maximum <= ai.minimum) {
+            d->ev_abs[i] = 0;          /* unusable range: ignore device */
+            break;
+        }
+        d->ev_abs_min[i][axis] = ai.minimum;
+        d->ev_abs_max[i][axis] = ai.maximum;
+        d->ev_abs_cur[i][axis] = ai.value;
     }
-    return 0;
 }
 
 /* One pass: (re)open /dev/input/event0..7, then decide which legacy
@@ -240,30 +328,39 @@ void omni_devs_rescan(struct omni_devs *d)
     int i;
     char path[64];
 
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < OMNI_EV_MAX; i++) {
         if (d->ev_fd[i] >= 0)
             close(d->ev_fd[i]);
         d->ev_fd[i] = -1;
     }
     d->ev_n = 0;
+    d->ev_has_rel = d->ev_has_abs = d->ev_has_kbd = 0;
 
-    for (i = 0; i < 8; i++) {
+    for (i = 0; i < OMNI_EV_MAX; i++) {
+        int fd;
+
         snprintf(path, sizeof(path), "/dev/input/event%d", i);
-        int fd = open(path, O_RDONLY | O_NONBLOCK);
-        if (fd >= 0)
-            d->ev_fd[d->ev_n++] = fd;
+        fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0)
+            continue;
+        d->ev_fd[d->ev_n] = fd;
+        d->ev_num[d->ev_n] = i;
+        evdev_classify(d, d->ev_n);
+        d->ev_has_rel |= d->ev_rel[d->ev_n];
+        d->ev_has_abs |= d->ev_abs[d->ev_n];
+        d->ev_has_kbd |= d->ev_kbd[d->ev_n];
+        d->ev_n++;
     }
 
-    d->ev_has_rel = evdev_has_bit(d, EV_REL, 0);
-    d->ev_has_kbd = evdev_has_bit(d, EV_KEY, KEY_A);
-
-    if (d->ev_has_rel) {
+    /* mousedev translates relative AND absolute evdev pointers into
+     * /dev/input/mice, so either kind rules the legacy source out */
+    if (d->ev_has_rel || d->ev_has_abs) {
         if (d->mice_fd >= 0) {
             close(d->mice_fd);
             d->mice_fd = -1;
         }
     } else if (d->mice_fd < 0) {
-        d->mice_fd = open("/dev/input/mice", O_RDONLY | O_NONBLOCK);
+        d->mice_fd = open("/dev/input/mice", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (d->mice_fd < 0)
             d->mice_fd = -1;
     }
@@ -274,7 +371,7 @@ void omni_devs_rescan(struct omni_devs *d)
             d->tty_fd = -1;
         }
     } else if (d->tty_fd < 0) {
-        d->tty_fd = open("/dev/tty", O_RDONLY | O_NONBLOCK);
+        d->tty_fd = open("/dev/tty", O_RDONLY | O_NONBLOCK | O_CLOEXEC);
         if (d->tty_fd >= 0) {
             struct termios t;
             if (tcgetattr(d->tty_fd, &t) == 0) {
@@ -294,12 +391,12 @@ void omni_devs_open(struct omni_devs *d)
     memset(d, 0, sizeof(*d));
     d->mice_fd = -1;
     d->tty_fd = -1;
-    for (i = 0; i < 8; i++)
+    for (i = 0; i < OMNI_EV_MAX; i++)
         d->ev_fd[i] = -1;
 
     for (try = 0; try < 20; try++) {
         omni_devs_rescan(d);
-        if ((d->ev_has_rel || d->mice_fd >= 0) &&
+        if ((d->ev_has_rel || d->ev_has_abs || d->mice_fd >= 0) &&
             (d->ev_has_kbd || d->tty_fd >= 0))
             break;
         if (try < 19)
@@ -350,12 +447,8 @@ void omni_devs_fill(struct omni_devs *d, struct pollfd *pfds)
 
 int omni_devs_drain(struct omni_devs *d, int idx)
 {
-    int fd;
-
-    if (idx < d->ev_n) {
-        fd = d->ev_fd[idx];
-        return read_ev(d, fd);
-    }
+    if (idx < d->ev_n)
+        return read_ev(d, idx);
     idx -= d->ev_n;
     if (idx == 0 && d->mice_fd >= 0)
         return read_mice(d, d->mice_fd);
@@ -365,11 +458,51 @@ int omni_devs_drain(struct omni_devs *d, int idx)
     return -1;
 }
 
+/* Diagnostics go to the kernel log (/dev/kmsg): printk copies them to
+ * EVERY console, so they reach the serial log and dmesg.  Writing to
+ * /dev/console instead only reaches the last console= on the command
+ * line (tty1, the screen underneath the desktop), never the serial port.
+ * Each write is one log record; a fresh open per call also gives each
+ * message its own devkmsg rate-limit budget. */
 void omni_console_puts(const char *s)
 {
-    int fd = open("/dev/console", O_WRONLY);
+    int fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+    if (fd < 0)
+        fd = open("/dev/console", O_WRONLY | O_NOCTTY | O_CLOEXEC);
     if (fd < 0)
         return;
     omni_tty_write_all(fd, s, strlen(s));
     close(fd);
+}
+
+void omni_devs_log(struct omni_devs *d)
+{
+    char line[160];
+    int i;
+    const char *ptr = d->ev_has_abs ? (d->ev_has_rel ? "evdev(abs+rel)" : "evdev(abs)")
+                    : d->ev_has_rel ? "evdev(rel)"
+                    : (d->mice_fd >= 0 ? "/dev/input/mice" : "NONE");
+    const char *kbd = d->ev_has_kbd ? "evdev"
+                    : (d->tty_fd >= 0 ? "/dev/tty" : "NONE");
+
+    snprintf(line, sizeof(line),
+             "desktop: input: evdev=%d pointer=%s keyboard=%s\n",
+             d->ev_n, ptr, kbd);
+    omni_console_puts(line);
+
+    for (i = 0; i < d->ev_n; i++) {
+        char name[64];
+
+        memset(name, 0, sizeof(name));
+        if (ioctl(d->ev_fd[i], EVIOCGNAME(sizeof(name) - 1), name) < 0)
+            strcpy(name, "?");
+        snprintf(line, sizeof(line),
+                 "desktop: input:   event%d \"%s\"%s%s%s%s\n",
+                 d->ev_num[i], name,
+                 d->ev_rel[i] ? " rel-pointer" : "",
+                 d->ev_abs[i] ? " abs-pointer" : "",
+                 d->ev_kbd[i] ? " keyboard" : "",
+                 (d->ev_rel[i] | d->ev_abs[i] | d->ev_kbd[i]) ? "" : " (unused)");
+        omni_console_puts(line);
+    }
 }

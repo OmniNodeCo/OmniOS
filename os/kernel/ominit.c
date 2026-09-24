@@ -64,6 +64,38 @@ int omni_reap(void)
     return n;
 }
 
+/* The kernel starts /init with no stdin/stdout/stderr when the initramfs
+ * has no /dev/console ("unable to open an initial console"), and every
+ * child inherits that. Give PID 1 and all its children:
+ *   stdin  = /dev/null   nothing may read the console: a shell reading
+ *                        tty1 would also receive every key typed into
+ *                        the desktop
+ *   stdout = stderr = /dev/kmsg   output lands in the kernel log, so
+ *                        printk carries it to every console, including
+ *                        the serial log (plain /dev/console writes reach
+ *                        only tty1, underneath the desktop).
+ * Needs /dev mounted; call after omni_mount_all(). */
+static void setup_stdio(void)
+{
+    int fd = open("/dev/null", O_RDONLY);
+
+    if (fd >= 0 && fd != 0) {
+        dup2(fd, 0);
+        close(fd);
+    }
+    fd = open("/dev/kmsg", O_WRONLY);
+    if (fd < 0)
+        fd = open("/dev/null", O_WRONLY);
+    if (fd >= 0) {
+        if (fd != 1)
+            dup2(fd, 1);
+        if (fd != 2)
+            dup2(fd, 2);
+        if (fd > 2)
+            close(fd);
+    }
+}
+
 static void reboot_now(int cmd)
 {
     sync();
@@ -84,9 +116,9 @@ int main(int argc, char **argv)
     signal(SIGTERM, on_sig);
     signal(SIGQUIT, on_sig);
 
-    omni_log("OmniOS init (PID 1): starting\n");
-
     omni_mount_all();
+    setup_stdio();
+    omni_log("OmniOS init (PID 1): starting\n");
 
     /* hostname */
     {

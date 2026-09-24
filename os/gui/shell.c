@@ -147,13 +147,13 @@ static void shell_finish(struct omni_wm *wm)
 /* clamp a delta so the cursor can never cross the desktop        */
 #define OMNI_WARP_CLAMP(v, lo, hi) ((v) < (lo) ? (lo) : (v) > (hi) ? (hi) : (v))
 
+/* Relative motion.  Deltas arrive already sign-correct: evdev reports
+ * plain signed REL_X/REL_Y values and the /dev/input/mice decoder
+ * sign-extends its bytes, so no PS/2 wrap-around fix-up belongs here
+ * (the old "9-bit underflow" correction reversed every fast movement:
+ * a +70 delta became -58). */
 static void omni_shell_warp(int dx, int dy)
 {
-    if (dx > 63)   dx -= 128;   /* PS/2 9-bit underflow */
-    if (dx < -64)  dx += 128;
-    if (dy > 63)   dy -= 128;
-    if (dy < -64)  dy += 128;
-
     /* safety clamp: beyond one byte per event cannot come from sane
      * devices, and it stops a bogus device from teleporting the cursor. */
     dx = OMNI_WARP_CLAMP(dx, -255, 255);
@@ -170,6 +170,16 @@ static void omni_shell_warp(int dx, int dy)
         if (nx != g_px) g_px = nx;
         if (ny != g_py) g_py = ny;
     }
+}
+
+/* Absolute position from a tablet-style pointer (VMware vmmouse, USB or
+ * virtio tablets), normalised to 0..65535 across the whole screen. */
+static void omni_shell_moveto(int ax, int ay)
+{
+    ax = OMNI_WARP_CLAMP(ax, 0, 65535);
+    ay = OMNI_WARP_CLAMP(ay, 0, 65535);
+    g_px = (int)((long)ax * (g_screen.w - 1) / 65535);
+    g_py = (int)((long)ay * (g_screen.h - 1) / 65535);
 }
 
 /* ------------------------------------------------------------------ */
@@ -462,21 +472,12 @@ void omni_shell_run(void)
     nfds_dev = omni_devs_nfds(&devs);
     omni_devs_fill(&devs, &pfds[1]);
 
-    /* report which input sources were found (lands in the serial log,
-     * which is the fastest way to see why the mouse/keyboard are or
-     * are not alive) */
-    {
-        char ibuf[128];
-        const char *iptr = devs.ev_has_rel ? "evdev"
-                        : (devs.mice_fd >= 0 ? "/dev/input/mice" : "NONE");
-        const char *ikbd = devs.ev_has_kbd ? "evdev"
-                        : (devs.tty_fd >= 0 ? "/dev/tty" : "NONE");
-        snprintf(ibuf, sizeof(ibuf),
-                 "desktop: input: evdev=%d pointer=%s keyboard=%s\n",
-                 devs.ev_n, iptr, ikbd);
-        omni_console_puts(ibuf);
-    }
-    g_input_ok_ptr = (devs.ev_has_rel || devs.mice_fd >= 0) ? 1 : 0;
+    /* report which input sources were found, with device names (kernel
+     * log -> serial log: the fastest way to see why the mouse/keyboard
+     * are or are not alive) */
+    omni_devs_log(&devs);
+    g_input_ok_ptr = (devs.ev_has_rel || devs.ev_has_abs ||
+                      devs.mice_fd >= 0) ? 1 : 0;
     g_input_ok_kbd = (devs.ev_has_kbd || devs.tty_fd >= 0) ? 1 : 0;
     g_shell_t0 = time(NULL);
 
@@ -506,7 +507,7 @@ void omni_shell_run(void)
         /* a pointer or keyboard may appear only after the boot-time
          * scan (late USB enumeration, hypervisor quirks): keep
          * rescanning every 2 s until both sources exist, then stop. */
-        if ((devs.ev_has_rel == 0 && devs.mice_fd < 0) ||
+        if ((devs.ev_has_rel == 0 && devs.ev_has_abs == 0 && devs.mice_fd < 0) ||
             (devs.ev_has_kbd == 0 && devs.tty_fd < 0)) {
             if (t - last_rescan >= 2) {
                 last_rescan = t;
@@ -514,8 +515,11 @@ void omni_shell_run(void)
                 omni_devs_fill(&devs, &pfds[1]);
                 nfds_dev = omni_devs_nfds(&devs);
                 nfds = 1 + nfds_dev;
-                g_input_ok_ptr = (devs.ev_has_rel || devs.mice_fd >= 0) ? 1 : 0;
+                g_input_ok_ptr = (devs.ev_has_rel || devs.ev_has_abs ||
+                                  devs.mice_fd >= 0) ? 1 : 0;
                 g_input_ok_kbd = (devs.ev_has_kbd || devs.tty_fd >= 0) ? 1 : 0;
+                if (g_input_ok_ptr && g_input_ok_kbd)
+                    omni_devs_log(&devs);      /* late device: say so */
             }
         }
 
@@ -550,6 +554,10 @@ void omni_shell_run(void)
         while (omni_input_next(&e) == 0) {
             if (e.type == 2) {                       /* mouse motion */
                 omni_shell_warp(e.dx, e.dy);
+                omni_wm_motion(&g_wm, g_px, g_py);
+                redraw = 1;
+            } else if (e.type == 4) {                 /* absolute position */
+                omni_shell_moveto(e.dx, e.dy);
                 omni_wm_motion(&g_wm, g_px, g_py);
                 redraw = 1;
             } else if (e.type == 3) {                 /* button */

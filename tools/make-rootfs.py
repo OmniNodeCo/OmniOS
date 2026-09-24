@@ -177,18 +177,14 @@ ulimit -c 0 2>/dev/null || true
 alias ll='ls -la'
 alias ls='ls --color=never'
 
-echo "OmniOS ${VERSION} — lightweight OS (Linux + musl + BusyBox + Nano-X)."
+echo "OmniOS ${VERSION} — lightweight OS (Linux + musl + OmniOS desktop)."
 echo "Type 'omnios-desktop' to (re)start the graphical desktop."
 """.replace("${VERSION}", VERSION)
 
 _MOTD = """\
-\\033[1;36m
        OmniOS ${VERSION} — a lightweight OS built from source
          kernel: Linux (static, x86_64)   libc: musl
-         shell: ash (BusyBox)             GUI: Nano-X / Microwindows
-\\033[0m
- Auto-login friendly; run `omnios-desktop` for the desktop,
- or multi-user with `login`.
+         shell: ash (BusyBox)             GUI: OmniOS desktop (from scratch)
 """.replace("${VERSION}", VERSION)
 
 _PASSWD = """\

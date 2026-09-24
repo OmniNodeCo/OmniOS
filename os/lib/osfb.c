@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include <linux/fb.h>
+#include <linux/kd.h>
 
 #include "omni.h"
 
@@ -33,8 +34,9 @@ int osfb_open(struct osfb *fb, const char *dev)
 
     memset(fb, 0, sizeof(*fb));
     fb->fd = -1;
+    fb->vt_fd = -1;
 
-    fb->fd = open(dev, O_RDWR);
+    fb->fd = open(dev, O_RDWR | O_CLOEXEC);
     if (fb->fd < 0)
         return -1;
 
@@ -83,6 +85,15 @@ int osfb_open(struct osfb *fb, const char *dev)
     else
         fb->name = strdup(dev);
 
+    /* Put the active virtual terminal into graphics mode: the kernel's
+     * text console (fbcon) then stops drawing kernel messages and its
+     * blinking cursor on top of the desktop, and stops blanking it. */
+    fb->vt_fd = open("/dev/tty0", O_RDWR | O_NOCTTY | O_CLOEXEC);
+    if (fb->vt_fd >= 0 && ioctl(fb->vt_fd, KDSETMODE, KD_GRAPHICS) < 0) {
+        close(fb->vt_fd);
+        fb->vt_fd = -1;
+    }
+
     return 0;
 
 fail:
@@ -107,9 +118,14 @@ void osfb_close(struct osfb *fb)
         munmap(fb->mem, fb->size);
     if (fb->fd >= 0)
         close(fb->fd);
+    if (fb->vt_fd >= 0) {                 /* hand the screen back to fbcon */
+        ioctl(fb->vt_fd, KDSETMODE, KD_TEXT);
+        close(fb->vt_fd);
+    }
     free(fb->name);
     memset(fb, 0, sizeof(*fb));
     fb->fd = -1;
+    fb->vt_fd = -1;
 }
 
 int osfb_wait(const char *dev, int retries, int delay_ms)

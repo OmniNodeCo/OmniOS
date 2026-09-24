@@ -44,6 +44,7 @@ struct osfb {
     int       depth;           /* bits per pixel                      */
     struct omni_pixfmt fmt;    /* device channel layout (packer)      */
     char     *name;            /* framebuffer id                      */
+    int       vt_fd;           /* /dev/tty0 held in KD_GRAPHICS mode  */
 };
 
 /* Open/mmap the framebuffer. Returns 0 on success, -1 on failure. */
@@ -93,7 +94,8 @@ enum {
 
 /* A single input unit, decoded from /dev/input/mice or /dev/tty raw. */
 struct omni_input {
-    int  type;                 /* 0 = none, 1 = key, 2 = motion, 3 = button */
+    int  type;                 /* 0 = none, 1 = key, 2 = motion, 3 = button,
+                                  4 = absolute position (dx,dy = 0..65535) */
     int  key;                  /* Linux keycode (buttons report too)       */
     int  pressed;              /* 0 released / 1 pressed / 2 repeat        */
     char text;                 /* printable char for type 1, else 0        */
@@ -110,24 +112,49 @@ void omni_input_init(struct omni_input *devs, int count);
 int  omni_input_next(struct omni_input *e);           /* -1 none, 0 ok  */
 void omni_input_push_key(int key, int pressed, int shift, char ch);
 void omni_input_push_mouse(int dx, int dy);
+/* absolute pointer position, normalised to 0..65535 on both axes */
+void omni_input_push_abs(int x, int y);
 void omni_input_push_button(int btn, int pressed);
 
 /* Device set: aggregated /dev/input/event*, /dev/input/mice, tty fallback. */
 struct pollfd;
 
+#define OMNI_EV_MAX 8
+
 struct omni_devs {
     int mice_fd;               /* /dev/input/mice (PS/2 3-byte protocol)  */
-    int ev_fd[8];              /* /dev/input/event0..7                    */
+    int ev_fd[OMNI_EV_MAX];    /* opened /dev/input/eventN, packed         */
     int ev_n;
     int tty_fd;                /* /dev/tty raw-mode keyboard fallback     */
-    /* set by omni_devs_open(): does an evdev device already carry the
-     * pointer (EV_REL) / keyboard (EV_KEY+KEY_A)?  When yes, the legacy
-     * /dev/input/mice and /dev/tty sources are NOT opened, because
-     * mousedev and the VT consume the very same input devices evdev
-     * exposes — reading both would double every motion and key press.  */
+
+    /* per opened evdev device (index = position in ev_fd[]) */
+    int ev_num[OMNI_EV_MAX];               /* N of /dev/input/eventN      */
+    unsigned char ev_rel[OMNI_EV_MAX];     /* relative pointer (REL_X)    */
+    unsigned char ev_abs[OMNI_EV_MAX];     /* absolute pointer (ABS_X/Y +
+                                              BTN_LEFT or BTN_TOUCH):
+                                              VMware vmmouse, USB/virtio
+                                              tablets (VirtualBox, QEMU) */
+    unsigned char ev_kbd[OMNI_EV_MAX];     /* keyboard (KEY_A)            */
+    unsigned char ev_seen[OMNI_EV_MAX];    /* first event already logged  */
+    unsigned char ev_abs_dirty[OMNI_EV_MAX];
+    int ev_abs_min[OMNI_EV_MAX][2];        /* [dev][0=X,1=Y] axis range   */
+    int ev_abs_max[OMNI_EV_MAX][2];
+    int ev_abs_cur[OMNI_EV_MAX][2];        /* last reported position      */
+
+    /* set by omni_devs_rescan(): does an evdev device already carry the
+     * pointer (relative or absolute) / keyboard (EV_KEY+KEY_A)?  When
+     * yes, the legacy /dev/input/mice and /dev/tty sources are NOT
+     * opened, because mousedev and the VT consume the very same input
+     * devices evdev exposes — reading both would double every motion
+     * and key press.  */
     int ev_has_rel;
+    int ev_has_abs;
     int ev_has_kbd;
 };
+
+/* Write "desktop: input ..." lines describing every source (names,
+ * pointer/keyboard type) to the kernel log. */
+void omni_devs_log(struct omni_devs *d);
 
 void omni_devs_open(struct omni_devs *d);
 /* one rescan pass; call repeatedly until a pointer + keyboard exist */

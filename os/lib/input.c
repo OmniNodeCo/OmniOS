@@ -165,6 +165,16 @@ void omni_input_push_mouse(int dx, int dy)
     q_push(&e);
 }
 
+void omni_input_push_abs(int x, int y)
+{
+    struct omni_input e;
+    memset(&e, 0, sizeof(e));
+    e.type = 4;
+    e.dx = x;
+    e.dy = y;
+    q_push(&e);
+}
+
 void omni_input_push_button(int btn, int pressed)
 {
     struct omni_input e;
