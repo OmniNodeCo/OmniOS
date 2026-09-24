@@ -75,6 +75,16 @@ void canvas_clear(struct canvas *c, uint32_t bg)
     c->cy = c->clip_y;
 }
 
+/* The 8 row bytes of a glyph (LSB = leftmost pixel); '?' for anything
+ * outside printable ASCII. For drawing code that renders glyphs itself
+ * (transparent or scaled text in os/gui/theme.c). */
+const unsigned char *omni_glyph8(uint32_t ch)
+{
+    if (ch < 32 || ch > 127)
+        ch = '?';
+    return (const unsigned char *)font8x8_basic[ch];
+}
+
 void canvas_draw_char(struct canvas *c, uint32_t ch, int x, int y,
                       uint32_t fg, uint32_t bg)
 {

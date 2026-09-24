@@ -240,6 +240,9 @@ void     raster_blit(struct raster *dst, const struct raster *src,
                      int dx, int dy);
 void     raster_blend(struct raster *dst, const struct raster *src,
                       int dx, int dy);
+/* write n canonical pixels to row y at x (clipped), converting to the
+ * raster's device format if needed — the compositor's present path     */
+void     raster_put_row(struct raster *dst, int x, int y, const uint32_t *px, int n);
 void     raster_blit_clip(struct raster *dst, const struct raster *src,
                           int dx, int dy, int cx, int cy, int cw, int ch);
 void     raster_scroll(struct raster *r, int dy, uint32_t fill);
@@ -261,6 +264,8 @@ struct canvas {
 };
 
 void canvas_init(struct canvas *c, struct raster *r, uint32_t fg, uint32_t bg);
+/* glyph rows of the 8x8 font (LSB = leftmost pixel), '?' if unprintable */
+const unsigned char *omni_glyph8(uint32_t ch);
 void canvas_set_clip(struct canvas *c, int x, int y, int w, int h);
 void canvas_gotoxy(struct canvas *c, int col, int row);
 void canvas_draw_char(struct canvas *c, uint32_t ch, int x, int y,

@@ -166,13 +166,14 @@ static int raster_fast(const struct raster *r)
     return omni_pixfmt_native(&r->fmt);
 }
 
-/* Write one canonical row into the device at base pixel offset.       */
+/* Write one canonical row into the device at base pixel offset
+ * (y * stride + x, in device pixels of pf->bytes each).               */
 static void raster_row_conv(struct raster *r, size_t base_offs,
                             const uint32_t *row, int w)
 {
     const struct omni_pixfmt *pf = &r->fmt;
-    uint8_t *dst = (uint8_t *)(r->bits + base_offs);
-    int bytes = pf->bytes;
+    int bytes = pf->bytes > 0 ? pf->bytes : 4;
+    uint8_t *dst = (uint8_t *)r->bits + base_offs * (size_t)bytes;
     int x, p = 0;
 
     for (x = 0; x < w; x++) {
@@ -404,6 +405,26 @@ void raster_blit_clip(struct raster *dst, const struct raster *src,
                             sx1 - sx0);
         }
     }
+}
+
+void raster_put_row(struct raster *dst, int x, int y, const uint32_t *px, int n)
+{
+    if (y < 0 || y >= dst->h)
+        return;
+    if (x < 0) {
+        px -= x;
+        n += x;
+        x = 0;
+    }
+    if (x + n > dst->w)
+        n = dst->w - x;
+    if (n <= 0)
+        return;
+    if (raster_fast(dst))
+        memcpy(dst->bits + (size_t)y * (size_t)dst->stride + (size_t)x, px,
+               (size_t)n * sizeof(uint32_t));
+    else
+        raster_row_conv(dst, (size_t)y * (size_t)dst->stride + (size_t)x, px, n);
 }
 
 void raster_blit(struct raster *dst, const struct raster *src, int dx, int dy)
