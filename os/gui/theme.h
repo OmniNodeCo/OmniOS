@@ -87,6 +87,9 @@ int  th_text2x_width(const char *s);
 void th_wallpaper(uint32_t *px, int w, int h);
 /* app icon: rounded square with a gentle gradient and the initial */
 void th_icon(struct raster *r, int x, int y, int size, uint32_t rgb, char letter);
+/* the classic lettered gradient tile (th_icon falls back to it) */
+void th_letter_icon(struct raster *r, int x, int y, int size, uint32_t rgb,
+                    char letter);
 /* the OmniOS logo: a blue-to-violet ring, anti-aliased */
 void th_logo(struct raster *r, int cx, int cy, int radius);
 

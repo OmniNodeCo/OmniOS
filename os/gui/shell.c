@@ -117,8 +117,13 @@ static void menu_reload(void)
 static uint32_t shell_icon_for(const char *title, char *glyph)
 {
     const struct omni_app_info *a = omni_app_for_title(title);
-    if (!a)
+    if (!a) {
+        if (title && strncmp(title, "Welcome", 7) == 0) {
+            *glyph = 'O';                   /* the OmniOS logo */
+            return 0x8b5cf6;
+        }
         return 0;
+    }
     *glyph = a->glyph;
     return a->color;
 }
@@ -833,7 +838,7 @@ static void welcome_paint(struct raster *s)
     th_fill_a(s, 0, 92, s->w, ch - 92, 0xffffff, 255);
     for (i = 0; i < (int)(sizeof(tips) / sizeof(tips[0])); i++) {
         int y = 110 + i * 32;
-        th_icon(s, 28, y, 22, tips[i].color, tips[i].glyph);
+        th_letter_icon(s, 28, y, 22, tips[i].color, tips[i].glyph);
         th_text(s, tips[i].text, 64, y + 7, 0x1f2937);
     }
 

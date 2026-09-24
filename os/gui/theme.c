@@ -11,6 +11,7 @@
 #include <string.h>
 
 #include "theme.h"
+#include "icons.h"
 
 static inline uint32_t *px_at(struct raster *r, int x, int y)
 {
@@ -394,7 +395,8 @@ int th_text2x_width(const char *s)
 /* artwork                                                            */
 /* ------------------------------------------------------------------ */
 
-void th_icon(struct raster *r, int x, int y, int size, uint32_t rgb, char letter)
+void th_letter_icon(struct raster *r, int x, int y, int size, uint32_t rgb,
+                    char letter)
 {
     int rad = size / 4, j, i;
     uint32_t top = th_shade(rgb, 45), bot = th_shade(rgb, -30);
@@ -421,6 +423,13 @@ void th_icon(struct raster *r, int x, int y, int size, uint32_t rgb, char letter
         th_text2x(r, s, x + (size - 14) / 2 - 1, y + (size - 16) / 2, 0xffffff);
     else
         th_text_bold(r, s, x + (size - 8) / 2, y + (size - 8) / 2, 0xffffff);
+}
+
+/* the app's pictogram if it has one (icons.c), else the lettered tile */
+void th_icon(struct raster *r, int x, int y, int size, uint32_t rgb, char letter)
+{
+    if (!icon_draw(r, x, y, size, letter))
+        th_letter_icon(r, x, y, size, rgb, letter);
 }
 
 void th_logo(struct raster *r, int cx, int cy, int radius)

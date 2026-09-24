@@ -30,7 +30,7 @@ BIN       := omnios-desktop ominit omnios-term omnios-files omnios-calc \
 # --- object lists -----------------------------------------------------
 LIB_OBJ := lib/raster.o lib/canvas.o lib/osfb.o lib/input.o lib/devinput.o
 GUI_OBJ := gui/wm.o gui/protocol.o gui/client.o gui/shell.o gui/desktop.o \
-           gui/catalog.o gui/theme.o
+           gui/catalog.o gui/theme.o gui/icons.o
 KER_OBJ := kernel/ominit.o kernel/ommount.o
 
 APP_OBJ := apps/app.o
@@ -39,7 +39,7 @@ all: $(addprefix $(OUTDIR)/,$(BIN))
 
 # --- desktop shell -----------------------------------------------------
 $(OUTDIR)/omnios-desktop: gui/desktop.o gui/shell.o gui/wm.o gui/protocol.o \
-		gui/catalog.o gui/theme.o lib/raster.o lib/canvas.o lib/osfb.o lib/input.o \
+		gui/catalog.o gui/theme.o gui/icons.o lib/raster.o lib/canvas.o lib/osfb.o lib/input.o \
 		lib/devinput.o lib/gfx.o
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -97,7 +97,8 @@ kernel/ommount.o: kernel/ommount.c kernel/ominit.h
 gui/desktop.o: gui/shell.h
 gui/shell.o: gui/shell.h gui/wm.h gui/widgets.h gui/catalog.h gui/theme.h
 gui/catalog.o: gui/catalog.h
-gui/theme.o: gui/theme.h lib/omni.h
+gui/theme.o: gui/theme.h gui/icons.h lib/omni.h
+gui/icons.o: gui/icons.h gui/theme.h lib/omni.h
 gui/wm.o: gui/wm.h gui/protocol.h gui/theme.h
 gui/protocol.o: gui/protocol.h
 gui/client.o: gui/client.h gui/protocol.h
