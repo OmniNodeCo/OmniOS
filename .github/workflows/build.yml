@@ -2,6 +2,20 @@ name: Build OmniOS
 
 on:
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Boot-test a published release (e.g. v2026.2.3) instead of building'
+        required: false
+        default: ''
+      variants:
+        description: 'Boot test variants, separated by ";" (blank = the default set)'
+        required: false
+        default: ''
+  # POST /repos/{owner}/{repo}/dispatches with event_type "build" builds and
+  # boot-tests the default branch; client_payload may carry "release" and
+  # "variants" like the inputs above.
+  repository_dispatch:
+    types: [build]
   push:
     branches: [main, master]
     paths-ignore:
@@ -25,6 +39,8 @@ env:
 jobs:
   build:
     name: Build (from source)
+    # boot-testing a published release needs no build
+    if: ${{ !inputs.release && !github.event.client_payload.release }}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     defaults:
@@ -207,3 +223,70 @@ jobs:
         with:
           path: .ccache
           key: omnios-ccache-v1-${{ steps.keys.outputs.image }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+  # Boot the ISO in QEMU/KVM with VMware-like hardware and time how long the
+  # desktop takes to appear (tools/boot-test.py); also signs in and opens
+  # Start and Quick Settings, with screenshots (artifact omnios-boot-test).
+  boot-test:
+    name: Boot test (QEMU)
+    needs: build
+    if: ${{ !cancelled() && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Get the ISO from this run's build
+        if: needs.build.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: omnios-artifacts
+          path: build/out
+
+      - name: Get the ISO of a published release
+        if: needs.build.result == 'skipped'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE: ${{ inputs.release || github.event.client_payload.release }}
+        run: |
+          mkdir -p build/out
+          gh release download "$RELEASE" --repo "$GITHUB_REPOSITORY" --dir build/out \
+              --pattern '*.iso' --pattern 'omnios-bzImage-*'
+          ls -la build/out
+
+      - name: Install QEMU and UEFI firmware
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends qemu-system-x86 ovmf >/dev/null
+          python3 -m pip install --user --break-system-packages -q pillow || true
+          # let the runner user open /dev/kvm (hardware virtualization)
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' |
+              sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm || true
+          qemu-system-x86_64 --version | head -n 1
+          ls -l /dev/kvm || echo "no /dev/kvm: the boot test runs without KVM (slow)"
+
+      - name: Boot test
+        env:
+          VARIANTS: ${{ inputs.variants || github.event.client_payload.variants }}
+        run: |
+          set -- --repeat 2
+          if [ -n "$VARIANTS" ]; then
+              IFS=';' read -r -a list <<< "$VARIANTS"
+              for v in "${list[@]}"; do set -- "$@" --variant "$v"; done
+          else
+              set -- "$@" --variant iso-efi --variant kernel-efi: \
+                          --variant "kernel-efi:omnios.serialshell initcall_debug log_buf_len=8M"
+          fi
+          python3 tools/boot-test.py --iso build/out/*.iso \
+              --kernel build/out/omnios-bzImage-* --out build/boot-test --print-thumbs "$@"
+
+      - name: Upload screenshots and logs
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: omnios-boot-test
+          path: build/boot-test
+          retention-days: 30
