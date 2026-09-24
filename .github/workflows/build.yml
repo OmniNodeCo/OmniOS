@@ -274,11 +274,16 @@ jobs:
               IFS=';' read -r -a list <<< "$VARIANTS"
               for v in "${list[@]}"; do set -- "$@" --variant "$v"; done
           else
-              set -- "$@" --variant iso-efi --variant kernel-efi: \
-                          --variant "kernel-efi:omnios.serialshell initcall_debug log_buf_len=8M"
+              # the ISO as VMware boots it; the same kernel handed over
+              # directly, with the kernel log read back (initcall times);
+              # the ISO on BIOS firmware
+              set -- "$@" --variant iso-efi \
+                          --variant "kernel-efi:omnios.serialshell initcall_debug log_buf_len=8M" \
+                          --variant iso-bios
           fi
           python3 tools/boot-test.py --iso build/out/*.iso \
-              --kernel build/out/omnios-bzImage-* --out build/boot-test --print-thumbs "$@"
+              --kernel build/out/omnios-bzImage-* --out build/boot-test \
+              --print-thumbs 3-desktop,4-start "$@"
 
       - name: Upload screenshots and logs
         if: ${{ !cancelled() }}

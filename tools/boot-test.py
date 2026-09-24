@@ -449,7 +449,7 @@ class Boot:
             return
         start = serial.size()
         serial.send("\n")
-        if serial.wait_for(r"# $|# \x1b|#\s*$", start, 8.0) is None:
+        if serial.wait_for(r"omnios-serial# ", start, 8.0) is None:
             self.result["shell"] = "no prompt on the serial port"
             return
         start = serial.size()
@@ -497,7 +497,7 @@ def fmt(v, unit=" s"):
     return "–" if v is None else ("%.2f%s" % (v, unit))
 
 
-def summarize(results, accel):
+def summarize(results, accel, sizes):
     by = {}
     for r in results:
         by.setdefault(r["variant"], []).append(r)
@@ -518,9 +518,11 @@ def summarize(results, accel):
         if not ok:
             msg = "no desktop: %s" % runs[0].get("error", "?")
         notes.append((variant, msg))
-    md = ["### Boot test (QEMU, %s)" % accel, "",
-          "| boot | reached desktop | median | each run (s) | first serial output | kernel ran /init at |",
-          "|---|---|---|---|---|---|"] + rows + [""]
+    md = ["### Boot test (QEMU, %s)" % accel, ""]
+    if sizes:
+        md += [", ".join("%s: %.1f MB" % (k, v / 1e6) for k, v in sizes), ""]
+    md += ["| boot | reached desktop | median | each run (s) | first serial output | kernel ran /init at |",
+           "|---|---|---|---|---|---|"] + rows + [""]
     for r in results:
         k = r.get("kernel") or {}
         if r["run"] != 1 or not k.get("lines"):
@@ -562,8 +564,9 @@ def main():
     ap.add_argument("--qemu", default="qemu-system-x86_64")
     ap.add_argument("--out", default="build/boot-test")
     ap.add_argument("--no-interact", action="store_true")
-    ap.add_argument("--print-thumbs", action="store_true",
-                    help="print small JPEGs of the screenshots as base64 (for logs)")
+    ap.add_argument("--print-thumbs", default="",
+                    help="print small JPEGs of these screenshots (comma-separated "
+                         "labels, e.g. 3-desktop,4-start) as base64, for logs")
     args = ap.parse_args()
 
     variants = args.variant or ["iso-efi"]
@@ -589,7 +592,9 @@ def main():
 
     with open(os.path.join(args.out, "result.json"), "w") as f:
         json.dump({"accel": accel, "results": results}, f, indent=1)
-    md, notes = summarize(results, accel)
+    sizes = [(name, os.path.getsize(path)) for name, path in
+             (("kernel image", args.kernel), ("ISO", args.iso)) if path and os.path.exists(path)]
+    md, notes = summarize(results, accel, sizes)
     with open(os.path.join(args.out, "summary.md"), "w") as f:
         f.write(md)
     print(md)
@@ -597,6 +602,8 @@ def main():
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
             f.write(md)
     if os.environ.get("GITHUB_ACTIONS") == "true":
+        if sizes:
+            print("::notice title=Sizes::%s" % ", ".join("%s %d bytes" % s_ for s_ in sizes))
         for variant, msg in notes:
             print("::notice title=Boot %s::%s" % (variant, gh_escape(msg)))
         # the kernel timeline of each variant's first boot, for the record
@@ -604,6 +611,8 @@ def main():
             k = r.get("kernel") or {}
             if r["run"] == 1 and k.get("lines"):
                 lines = ["milestones %s" % json.dumps(k.get("milestones", {}))]
+                if r.get("shell"):
+                    lines.append("serial shell: %s" % r["shell"])
                 lines += ["pause %.3f s after [%.3f] %s" % (g[0], g[1], g[2])
                           for g in k.get("gaps", [])[:8]]
                 lines += ["initcall %.1f ms %s" % (us / 1000.0, n)
@@ -617,8 +626,11 @@ def main():
                     gh_escape("\n".join(r.get("serial_tail", [])[-12:]))))
 
     if args.print_thumbs:
+        wanted = set(args.print_thumbs.split(","))
         for r in results:
             for s in r.get("screens", []):
+                if s["label"] not in wanted and "all" not in wanted:
+                    continue
                 png = os.path.join(args.out, s["file"])
                 jpg = thumbnail(png, png[:-4] + ".jpg")
                 if not jpg:
