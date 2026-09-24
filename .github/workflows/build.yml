@@ -29,7 +29,7 @@ permissions:
 env:
   OMNIOS_JOBS: 4
   # Compiler cache. Every gcc/cc call in the build (Linux kernel, musl,
-  # BusyBox, Nano-X, the OmniOS core) goes through ccache because
+  # BusyBox, the OmniOS core) goes through ccache because
   # /usr/lib/ccache is put first on PATH; the cache directory itself is
   # carried between runs by the "compiler cache" steps below.
   CCACHE_DIR: ${{ github.workspace }}/.ccache
@@ -74,7 +74,7 @@ jobs:
 
       # ------------------------------------------------------------------
       # Cache keys.
-      #  * userspace: the prebuilt bc / musl sysroot / BusyBox / Nano-X are
+      #  * userspace: the prebuilt bc / musl sysroot / BusyBox are
       #    reused only if nothing that shapes them changed: this workflow,
       #    build.sh, their configs, the kernel patch (UAPI headers), the
       #    exact upstream commits just fetched, the compiler, the runner
@@ -88,9 +88,8 @@ jobs:
           image="${ImageOS:-unknown}"
           us=$( {
                   cat .github/workflows/build.yml scripts/build.sh \
-                      tools/config/busybox.config \
-                      tools/config/microwindows.config patches/*
-                  for p in bc musl busybox microwindows linux; do
+                      tools/config/busybox.config patches/*
+                  for p in bc musl busybox linux; do
                       echo "$p $(git -C "src/$p" rev-parse HEAD)"
                   done
                   CCACHE_DISABLE=1 gcc -dumpfullversion
@@ -108,7 +107,7 @@ jobs:
           restore-keys: |
             omnios-ccache-v1-${{ steps.keys.outputs.image }}-
 
-      - name: Restore prebuilt userspace (bc, musl, BusyBox, Nano-X)
+      - name: Restore prebuilt userspace (bc, musl, BusyBox)
         id: userspace-restore
         uses: actions/cache/restore@v4
         with:
@@ -118,7 +117,6 @@ jobs:
             src/bc/bin
             src/musl/lib/libc.a
             src/busybox/busybox
-            src/microwindows/src/bin
           key: ${{ steps.keys.outputs.userspace }}
 
       - name: Prepare compiler cache
@@ -145,7 +143,6 @@ jobs:
             src/bc/bin
             src/musl/lib/libc.a
             src/busybox/busybox
-            src/microwindows/src/bin
           key: ${{ steps.keys.outputs.userspace }}
 
       - name: Assemble the root filesystem
@@ -210,7 +207,7 @@ jobs:
             echo "| ccache hit rate | ${rate}% (${direct} direct + ${pre} preprocessed hits, ${miss} misses) |"
             echo "| ccache saved this run | ${save} |"
             if [ "$USERSPACE_HIT" = true ]; then
-              echo "| prebuilt userspace | hit (bc, musl, BusyBox, Nano-X not rebuilt) |"
+              echo "| prebuilt userspace | hit (bc, musl, BusyBox not rebuilt) |"
             else
               echo "| prebuilt userspace | miss (rebuilt and saved) |"
             fi

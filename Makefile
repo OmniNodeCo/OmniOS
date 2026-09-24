@@ -8,7 +8,7 @@ help:
 	@echo "  make fetch       download upstream sources"
 	@echo "  make toolchain   bc + kernel headers"
 	@echo "  make musl        musl libc into build/sysroot"
-	@echo "  make userspace   musl + busybox + microwindows"
+	@echo "  make userspace   musl + busybox + the OmniOS core"
 	@echo "  make os          build the OmniOS core (init + desktop + apps)"
 	@echo "  make rootfs      assemble build/rootfs"
 	@echo "  make kernel      configure + build the Linux kernel"

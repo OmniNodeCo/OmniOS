@@ -9,19 +9,18 @@ kernel as the initramfs via CONFIG_INITRAMFS_SOURCE, so everything below `/`
 is authored here.
 
 Layout produced:
-    /init                    first process: mount, seed /dev, exec init
-    /etc/inittab             BusyBox init (getty on tty1..2, ttyS0)
-    /etc/init.d/rcS          sysinit hook (mdev, hostname, motd, DM)
+    /init                    -> /usr/bin/ominit, the from-scratch PID 1: mounts
+                             the virtual filesystems and starts the desktop,
+                             the network and OmniOS Update
+    /sbin/init               -> /usr/bin/ominit as well
+    /usr/bin/omnios-*        the desktop shell and the apps
     /etc/init.d/network      DHCP on every wired adapter (started by ominit)
     /usr/share/udhcpc/default.script   applies a DHCP lease
     /etc/omnios-update.conf  where OmniOS Update finds new releases
-    /etc/passwd, /etc/group
-    /etc/profile             interactive ash environment
+    /etc/passwd, /etc/group, /etc/shadow
+    /etc/profile             interactive ash environment (Terminal)
     /etc/omnios-release      identity
-    /usr/bin/omnios-desktop  launches the graphical desktop (nano-X + nanowm)
-    /bin/*                   BusyBox + applet symlinks
-    /usr/bin/nano-X ...      the Nano-X GUI binaries
-    /etc/fonts/*             built-in BDF fonts for the GUI
+    /bin/*                   BusyBox + applet symlinks (shell, wget, udhcpc)
 
 Everything is deterministic and never requires superuser privileges.
 """
@@ -34,69 +33,11 @@ OUT = os.path.abspath(os.environ.get("ROOTFS_OUT", os.path.join(REPO, "build", "
 VERSION = open(os.path.join(REPO, "version.txt")).read().strip()
 
 # Where the per-stage builders put their install trees.
-MW_BIN = os.path.join(REPO, "build", "install", "microwindows", "bin")
-MW_FONTS = os.path.join(REPO, "build", "install", "microwindows", "fonts")
 BB = os.path.join(REPO, "build", "install", "busybox")
 OS_BIN = os.path.join(REPO, "build", "install", "os", "bin")
 
 
 # ---- static file contents ------------------------------------------------
-_INIT = """\
-#!/bin/sh
-# OmniOS /init — the very first userspace process (ash, BusyBox).
-# Mounts the virtual filesystems, seeds /dev, then hands control to the
-# from-scratch PID 1 (/sbin/init -> /usr/bin/ominit). ominit itself also
-# performs these mounts, so if it is missing we fall back to the BusyBox
-# init/inittab path below.
-export PATH=/usr/bin:/bin:/sbin:/usr/sbin
-
-/bin/mount -t proc     proc     /proc
-/bin/mount -t sysfs    sysfs    /sys
-/bin/busybox mount -t devtmpfs devtmpfs /dev 2>/dev/null \\
-    || /bin/mount -t tmpfs tmpfs /dev
-mkdir -p /dev/pts /dev/shm /dev/input
-/bin/mount -t devpts devpts /dev/pts 2>/dev/null
-/bin/mount -t tmpfs tmpfs /tmp
-/bin/mkdir -p /run /var/log
-
-# Device nodes that mdev may not create before init runs.
-/bin/mknod /dev/console c 5 1 2>/dev/null
-/bin/mknod /dev/null    c 1 3 2>/dev/null
-/bin/mknod /dev/zero    c 1 5 2>/dev/null
-/bin/mknod /dev/tty     c 5 0 2>/dev/null
-/bin/mknod /dev/tty0    c 4 0 2>/dev/null
-/bin/mknod /dev/tty1    c 4 1 2>/dev/null
-/bin/mknod /dev/tty2    c 4 2 2>/dev/null
-/bin/mknod /dev/ttyS0   c 4 64 2>/dev/null
-
-if [ -e /proc/sys/kernel/hotplug ]; then
-    echo /sbin/mdev > /proc/sys/kernel/hotplug 2>/dev/null
-fi
-/bin/mdev -s 2>/dev/null || true
-
-echo "OmniOS ${VERSION} — booting."
-
-# Prefer the from-scratch PID 1.
-if [ -x /sbin/init ]; then
-    exec /sbin/init
-fi
-# Fallback: BusyBox init + /etc/inittab.
-exec /bin/busybox init
-""".replace("${VERSION}", VERSION)
-
-_INITTAB = """\
-# OmniOS /etc/inittab — BusyBox init
-::sysinit:/etc/init.d/rcS
-::respawn:-/bin/login
-tty1::respawn:/sbin/getty -L tty1 0 vt100
-tty2::respawn:/sbin/getty -L tty2 0 vt100
-ttyS0::respawn:/sbin/getty -L ttyS0 115200 vt100
-::restart:/sbin/init
-::ctrlaltdel:/sbin/reboot
-::shutdown:/bin/umount -a -r
-::shutdown:/bin/swapoff -a
-"""
-
 _NETWORK = """\
 #!/bin/sh
 # OmniOS /etc/init.d/network: started by ominit at boot. Loopback, then DHCP
@@ -143,78 +84,6 @@ bound|renew)
     ;;
 esac
 exit 0
-"""
-
-_RCS = """\
-#!/bin/sh
-# OmniOS /etc/init.d/rcS — sysinit for BusyBox init
-export PATH=/usr/bin:/bin:/sbin:/usr/sbin
-
-/bin/hostname omnios
-/bin/mount -o remount,rw / 2>/dev/null || true
-/bin/mount -a 2>/dev/null || true
-
-if [ -x /sbin/mdev ]; then
-    /sbin/mdev -s
-fi
-
-/bin/cat /etc/motd > /dev/console 2>/dev/null
-
-# A serial console gives a rescue shell even when no display is attached.
-if [ -c /dev/ttyS0 ]; then
-    echo "OmniOS: serial console available." > /dev/ttyS0 2>/dev/null
-fi
-
-# Bring up the graphical desktop if we are on the active console.
-# (Only reached under the BusyBox-init fallback; ominit spawns the desktop
-# binary itself and never runs rcS.)
-if [ -x /etc/init.d/desktop ]; then
-    /etc/init.d/desktop &
-fi
-exit 0
-"""
-
-_DESKTOP = """\
-#!/bin/sh
-# OmniOS graphical desktop session.
-#
-# Prefer the from-scratch OmniOS desktop shell (owns the framebuffer and runs
-# a window-manager/display-server on /tmp/.omnios-wm). If it is not present,
-# fall back to Nano-X (nano-X) with its window manager and demo apps.
-export PATH=/usr/bin:/bin:/sbin:/usr/sbin
-export DISPLAY=:0
-
-# Wait briefly for the kernel to register /dev/fb0 (simpledrm / VESA / GOP).
-i=0
-while [ ! -e /dev/fb0 ] && [ "$i" -lt 50 ]; do
-    sleep 0.1 2>/dev/null || sleep 1
-    i=$((i + 1))
-done
-
-if [ ! -e /dev/fb0 ]; then
-    echo "OmniOS: no framebuffer found — text console only."
-    exec /bin/sh
-fi
-
-if [ -x /usr/bin/omnios-desktop ]; then
-    echo "OmniOS: starting the desktop shell."
-    exec /usr/bin/omnios-desktop
-fi
-
-# Nano-X fallback (kept for reference/demos)
-echo "OmniOS: starting Nano-X desktop (fallback)."
-/usr/bin/nano-X -p &
-NANOX_PID=$!
-trap 'kill $NANOX_PID 2>/dev/null' INT TERM EXIT
-i=0
-while [ ! -S /tmp/.nano-X ] && [ "$i" -lt 50 ]; do
-    sleep 0.1 2>/dev/null || sleep 1
-    i=$((i + 1))
-done
-/usr/bin/nxterm -T "OmniOS Terminal" /bin/sh &
-/usr/bin/nxclock &
-/usr/bin/nxcalc &
-wait $NANOX_PID
 """
 
 _PROFILE = """\
@@ -266,7 +135,7 @@ def main():
 
     # ---- directory skeleton ------------------------------------------------
     for d in ("bin", "sbin", "usr/bin", "usr/sbin", "usr/lib", "usr/share",
-              "etc", "etc/init.d", "etc/fonts", "dev", "proc", "sys", "tmp",
+              "etc", "etc/init.d", "dev", "proc", "sys", "tmp",
               "run", "var", "var/log", "var/run", "var/lib/omnios",
               "var/lib/omnios/update", "usr/share/udhcpc", "mnt",
               "root", "home/omnios"):
@@ -287,14 +156,14 @@ def main():
             dst = os.path.join(OUT, "usr", "bin", b)
             shutil.copy(s, dst)
             os.chmod(dst, 0o755)
-    # ominit doubles as /sbin/init (PID 1) and /init's exec target.
-    # Install it BEFORE the BusyBox /sbin aliases below: overlaying a plain
-    # file onto an absolute symlink would otherwise follow the link and try
-    # to write the host's /bin/busybox (PermissionError).
-    ominit = os.path.join(OS_BIN, "ominit")
-    if os.path.exists(ominit):
-        shutil.copy(ominit, os.path.join(OUT, "sbin", "init"))
-        os.chmod(os.path.join(OUT, "sbin", "init"), 0o755)
+    # ominit is PID 1: the kernel runs /init, and /sbin/init is where
+    # programs look for it. Both are links, so there is one copy.
+    if os.path.exists(os.path.join(OS_BIN, "ominit")):
+        os.symlink("/usr/bin/ominit", os.path.join(OUT, "init"))
+        os.symlink("/usr/bin/ominit", os.path.join(OUT, "sbin", "init"))
+    else:
+        print("make-rootfs: WARN: ominit not built: the OS cannot start.",
+              file=sys.stderr)
 
     # ---- BusyBox and applet symlinks --------------------------------------
     if os.path.exists(bb):
@@ -313,24 +182,7 @@ def main():
     else:
         print("make-rootfs: skipping BusyBox (not built).", file=sys.stderr)
 
-    # ---- Nano-X / Microwindows GUI -----------------------------------------
-    for b in ("nano-X", "nanowm", "nxterm", "nxclock", "nxcalc", "nxview",
-              "nxev", "nxkbd", "nxlsclients", "nxroach", "nxtetris",
-              "mwhello", "mwin", "mwsci"):
-        s = os.path.join(MW_BIN, b)
-        if os.path.exists(s):
-            shutil.copy(s, os.path.join(OUT, "usr", "bin", b))
-            os.chmod(os.path.join(OUT, "usr", "bin", b), 0o755)
-    # fonts
-    if os.path.isdir(MW_FONTS):
-        for f in sorted(os.listdir(MW_FONTS)):
-            shutil.copy(os.path.join(MW_FONTS, f),
-                        os.path.join(OUT, "etc", "fonts", f))
-
-    # ---- /init and /etc ----------------------------------------------------
-    w("init", _INIT, 0o755)
-    w("etc/inittab", _INITTAB)
-    w("etc/init.d/rcS", _RCS, 0o755)
+    # ---- /etc ----------------------------------------------------------------
     w("etc/profile", _PROFILE)
     w("etc/passwd", _PASSWD)
     # no password until the user sets one (Settings > Accounts)
@@ -359,11 +211,6 @@ def main():
       "sysfs /sys sysfs defaults 0 0\n"
       "tmpfs /tmp tmpfs defaults 0 0\n"
       "devpts /dev/pts devpts defaults 0 0\n")
-    # Desktop session launcher (shell). The from-scratch window manager is
-    # the COMPILED binary /usr/bin/omnios-desktop, copied above; this script
-    # waits for /dev/fb0 and starts it (Nano-X fallback for the BusyBox path).
-    w("etc/init.d/desktop", _DESKTOP, 0o755)
-
     print("make-rootfs: assembled %s" % OUT)
 
 

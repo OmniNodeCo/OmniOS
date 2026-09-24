@@ -4,7 +4,7 @@
 #   scripts/build.sh            full build (fetch, toolchain, kernel, iso)
 #   scripts/build.sh kernel     only the kernel + embedded initramfs
 #   scripts/build.sh rootfs     only the root filesystem
-#   scripts/build.sh userspace  musl + busybox + microwindows
+#   scripts/build.sh userspace  musl + busybox + the OmniOS core
 #   scripts/build.sh fetch      only download upstream sources
 #   scripts/build.sh iso        assemble the bootable ISO (UEFI)
 #
@@ -54,7 +54,6 @@ stage_fetch() {
     clone linux        https://github.com/torvalds/linux.git        v6.12
     clone musl         https://github.com/ifduyue/musl.git           v1.2.6
     clone busybox      https://github.com/mirror/busybox.git         1_36_1
-    clone microwindows https://github.com/ghaerr/microwindows.git
     clone bc           https://github.com/gavinhoward/bc.git          7.1.0
     # apply the reproducible kernel edits
     (
@@ -163,28 +162,12 @@ stage_busybox() {
     log "  busybox: $SRC/busybox/busybox"
 }
 
-stage_microwindows() {
-    log "building Microwindows / Nano-X (static, musl)…"
-    require gcc
-    [ -x "$SRC/microwindows/src/bin/nano-X" ] && { log "  nano-X (already built)"; return; }
-    cp "$ROOT/tools/config/microwindows.config" "$SRC/microwindows/src/config"
-    make -C "$SRC/microwindows/src" -j"$JOBS" \
-        COMPILER="$SIM/usr/bin/musl-gcc" \
-        CFLAGS="-Os -static" \
-        LDFLAGS="-static"
-    log "  nano-X: $SRC/microwindows/src/bin/nano-X"
-}
-
 stage_binaries() {
     # normalise the install trees make-rootfs expects
-    local mwbin="$BLD/install/microwindows/bin"
-    local mwfonts="$BLD/install/microwindows/fonts"
     local bbin="$BLD/install/busybox"
     local osbin="$BLD/install/os/bin"
-    mkdir -p "$mwbin" "$mwfonts" "$bbin" "$osbin"
+    mkdir -p "$bbin" "$osbin"
     cp -f "$SRC/busybox/busybox" "$bbin/busybox" 2>/dev/null || true
-    cp -f "$SRC"/microwindows/src/bin/* "$mwbin/" 2>/dev/null || true
-    cp -f "$SRC"/microwindows/src/fonts/bdf/*.bdf "$mwfonts/" 2>/dev/null || true
     log "  staged binaries to $BLD/install"
 }
 
@@ -209,7 +192,6 @@ stage_kernel() {
     [ -x "$SRC/bc/bin/bc" ] || die "bc not built yet: run scripts/build.sh toolchain"
     stage_musl
     stage_busybox
-    stage_microwindows
     stage_os
     stage_rootfs
     (
@@ -264,14 +246,14 @@ case "$STAGE" in
     fetch)     stage_fetch ;;
     toolchain) stage_toolchain ;;
     musl)      stage_musl ;;
-    userspace) stage_toolchain; stage_musl; stage_busybox; stage_microwindows; stage_os ;;
+    userspace) stage_toolchain; stage_musl; stage_busybox; stage_os ;;
     os)        stage_os ;;
     rootfs)    stage_rootfs ;;
     kernel)    stage_kernel ;;
     iso)       stage_iso ;;
     clean)     stage_clean ;;
     full|all)  stage_fetch; stage_toolchain; stage_musl; stage_busybox; \
-               stage_microwindows; stage_os; stage_rootfs; stage_kernel; stage_iso ;;
+               stage_os; stage_rootfs; stage_kernel; stage_iso ;;
     *) die "unknown stage: $STAGE (try fetch|toolchain|userspace|os|rootfs|kernel|iso|clean)" ;;
 esac
 log "done."

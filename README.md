@@ -16,7 +16,7 @@ source inside this repository.
 | Kernel | Linux `v6.12` (git, `torvalds/linux`) | x86_64, monolithic, bootable via EFI stub |
 | C library | musl `1.2.6` | static userspace, no glibc |
 | Core tools | BusyBox `1.36.1` | static, ash shell, ~75 applets |
-| GUI | OmniOS desktop (written from scratch, `os/gui`) | Windows 11-style desktop on the Linux framebuffer: compositing window manager, centred taskbar, Start menu with search, Quick Settings, desktop icons, App Store and bundled apps. (Microwindows / Nano-X is still built and shipped as an unused fallback from earlier versions.) |
+| GUI | OmniOS desktop (written from scratch, `os/gui`) | Windows 11-style desktop on the Linux framebuffer: compositing window manager, centred taskbar, Start menu with search, Quick Settings, desktop icons, App Store and bundled apps. |
 | Build tools | `bc` (gavinhoward), `musl-gcc`, `pycdlib`, flex+bison | only what the build itself needs |
 
 Everything boots from an **embedded initramfs** built into the kernel, so a
@@ -54,7 +54,6 @@ tools/make-rootfs.py               assembles build/rootfs (the OS itself)
 tools/make-iso.py                  assembles the hybrid BIOS+UEFI ISO + .vmx
 tools/make-fat.py                  pure-Python FAT image builder for the EFI System Partition
 tools/config/busybox.config        BusyBox build config
-tools/config/microwindows.config   Nano-X framebuffer build config
 patches/kernel-omnios.patch        the 3 kernel-tree edits, for reproducibility
 .github/workflows/build.yml        CI: builds kernel + ISO (ccache + prebuilt-userspace caches)
 .github/workflows/release.yml      publishes the ISO as a GitHub release
@@ -156,14 +155,14 @@ The desktop follows Windows 11:
 python3 -m pip install --user --break-system-packages pycdlib
 
 # 1. everything, in order:
-#    fetch -> toolchain -> musl -> busybox -> microwindows -> rootfs -> kernel -> iso
+#    fetch -> toolchain -> musl -> busybox -> os -> rootfs -> kernel -> iso
 scripts/build.sh full        # or: make full
 
 # individual stages:
-scripts/build.sh fetch       # git clone linux v6.12, musl, busybox, microwindows, bc
+scripts/build.sh fetch       # git clone linux v6.12, musl, busybox, bc
 scripts/build.sh toolchain   # bc + kernel UAPI headers into build/sysroot
 scripts/build.sh musl        # musl libc into build/sysroot
-scripts/build.sh userspace   # musl + busybox + microwindows
+scripts/build.sh userspace   # musl + busybox + the OmniOS core
 scripts/build.sh os          # build the OmniOS core (init + desktop + apps)
 scripts/build.sh rootfs      # assemble build/rootfs via tools/make-rootfs.py
 scripts/build.sh kernel      # x86_64_defconfig + overrides + bzImage (initramfs)
@@ -262,7 +261,7 @@ Three minimal, justified edits (see `patches/kernel-omnios.patch`):
 
 - kernel: configures and compiles (native `olddefconfig` + flex/bison; the
   in-tree `bc` build is pinned at 7.1.0)
-- musl, BusyBox (static), Nano-X (static) and the `os/` core all build
+- musl, BusyBox (static) and the `os/` core all build
 - root filesystem assembles completely
 - ISO tooling produces a hybrid BIOS+UEFI image (CI) plus a VMware `.vmx`;
   a UEFI-only fallback exists on hosts without xorriso/isolinux
