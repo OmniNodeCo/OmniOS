@@ -25,6 +25,8 @@ static int verb_numc(const char *verb)
         { "RAISE", 1 }, { "CLEAR", 1 }, { "FILL",  5 }, { "RECT",  5 },
         { "TEXT",  3 }, { "TEXTC", 5 }, { "QUIT",  0 }, { "OK",    1 },
         { "ERR",   0 }, { "KEY",   4 }, { "BTN",   5 }, { "BYE",   0 },
+        { "RFILL", 6 }, { "TEXT2", 4 }, { "TEXTT", 4 }, { "ICON",  6 },
+        { "GRAD",  8 },
     };
     size_t i;
     for (i = 0; i < sizeof(t) / sizeof(t[0]); i++)

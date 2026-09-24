@@ -21,6 +21,11 @@
  *     RECT  <win> <x> <y> <w> <h> <rrggbb>\n
  *     TEXT  <win> <x> <y> <text...>\n
  *     TEXTC <win> <x> <y> <fg> <bg> <text...>\n   fg/bg: 0xRRGGBB as decimal
+ *     RFILL <win> <x> <y> <w> <h> <radius> <rrggbb>\n  anti-aliased rounded rect
+ *     TEXT2 <win> <x> <y> <fg> <text...>\n   16 px text (14 px advance),
+ *     TEXTT <win> <x> <y> <fg> <text...>\n   8 px text; both transparent
+ *     GRAD  <win> <x> <y> <w> <h> <from> <to> <vertical>\n   linear gradient
+ *     ICON  <win> <x> <y> <size> <rgb> <glyph>\n   app icon, glyph = ASCII code
  *     QUIT\n
  *
  *   server -> client:

@@ -4,6 +4,7 @@
  * Client side of the OmniOS window protocol.
  */
 #include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -172,6 +173,77 @@ int omni_client_textc(struct omni_client_conn *c, int x, int y,
         return -1;
     proto_build_text(line, sizeof(line), "TEXTC", 5, num, s);
     return proto_send(c->fd, line);
+}
+
+int omni_client_rfill(struct omni_client_conn *c, int x, int y, int w, int h,
+                      int radius, uint32_t rgb)
+{
+    char line[OMNI_PROTO_MAX_LINE];
+    char hexc[16];
+    long num[6] = { c->win, x, y, w, h, radius };
+    if (c->fd < 0 || c->win <= 0)
+        return -1;
+    snprintf(hexc, sizeof(hexc), "%06x", rgb & 0xffffff);
+    proto_build_text(line, sizeof(line), "RFILL", 6, num, hexc);
+    return proto_send(c->fd, line);
+}
+
+int omni_client_grad(struct omni_client_conn *c, int x, int y, int w, int h,
+                     uint32_t from, uint32_t to, int vertical)
+{
+    char line[OMNI_PROTO_MAX_LINE];
+    long num[8] = { c->win, x, y, w, h, (long)(from & 0xffffff),
+                    (long)(to & 0xffffff), vertical ? 1 : 0 };
+    if (c->fd < 0 || c->win <= 0)
+        return -1;
+    proto_build_text(line, sizeof(line), "GRAD", 8, num, "");
+    return proto_send(c->fd, line);
+}
+
+int omni_client_icon(struct omni_client_conn *c, int x, int y, int size,
+                     uint32_t rgb, char glyph)
+{
+    char line[OMNI_PROTO_MAX_LINE];
+    long num[6] = { c->win, x, y, size, (long)(rgb & 0xffffff),
+                    (long)(unsigned char)glyph };
+    if (c->fd < 0 || c->win <= 0)
+        return -1;
+    proto_build_text(line, sizeof(line), "ICON", 6, num, "");
+    return proto_send(c->fd, line);
+}
+
+static int client_text_fg(struct omni_client_conn *c, const char *verb,
+                          int x, int y, uint32_t fg, const char *s)
+{
+    char line[OMNI_PROTO_MAX_LINE];
+    long num[4] = { c->win, x, y, (long)(fg & 0xffffff) };
+    if (c->fd < 0 || c->win <= 0)
+        return -1;
+    proto_build_text(line, sizeof(line), verb, 4, num, s);
+    return proto_send(c->fd, line);
+}
+
+int omni_client_text2(struct omni_client_conn *c, int x, int y, uint32_t fg,
+                      const char *s)
+{
+    return client_text_fg(c, "TEXT2", x, y, fg, s);
+}
+
+int omni_client_textt(struct omni_client_conn *c, int x, int y, uint32_t fg,
+                      const char *s)
+{
+    return client_text_fg(c, "TEXTT", x, y, fg, s);
+}
+
+int omni_client_wait(struct omni_client_conn *c, int timeout_ms)
+{
+    struct pollfd pfd;
+    if (c->fd < 0)
+        return -1;
+    pfd.fd = c->fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    return poll(&pfd, 1, timeout_ms);
 }
 
 int omni_client_poll(struct omni_client_conn *c, struct omni_client_event *e)

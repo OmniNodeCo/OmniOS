@@ -16,7 +16,8 @@
 #include "../lib/omni.h"
 #include "protocol.h"
 
-#define OMNI_WM_TITLE_H 20
+#define OMNI_WM_TITLE_H 32         /* window title bar height           */
+#define OMNI_TASKBAR_H  44         /* the shell's taskbar, bottom edge  */
 #define OMNI_WM_MAX_WIN 16
 #define OMNI_WM_MAX_CLI 16
 
@@ -37,6 +38,7 @@ struct omni_win {
     int    minw, minh;
     char   title[64];
     int    client;              /* index into omni_wm.clients, or -1     */
+    int    minimized;           /* hidden until restored from the taskbar */
     struct raster surface;      /* backing store                         */
 };
 
@@ -58,6 +60,9 @@ struct omni_wm {
      * the shell can draw its always-on-top chrome (taskbar/menu/cursor)
      * and then present/flip the buffer as one final step.                */
     void (*finish)(struct omni_wm *wm);
+    /* optional: title-bar icon for a window — returns its colour (0 =
+     * default) and may set *glyph (default: the title's first letter)  */
+    uint32_t (*icon_for)(const char *title, char *glyph);
     struct omni_client clients[OMNI_WM_MAX_CLI];
 
     struct omni_win wins[OMNI_WM_MAX_WIN];
@@ -88,22 +93,22 @@ int  omni_wm_handle_client(struct omni_wm *wm, int ci);
 struct omni_win *omni_wm_add(struct omni_wm *wm, const char *title,
                              int x, int y, int w, int h);
 void omni_wm_close(struct omni_wm *wm, struct omni_win *w);
+/* raise + focus (also restores a minimized window) */
 void omni_wm_raise(struct omni_wm *wm, struct omni_win *w);
+void omni_wm_minimize(struct omni_wm *wm, struct omni_win *w);
 
 struct omni_win *omni_wm_find(struct omni_wm *wm, int win_id);
 struct omni_win *omni_wm_at(struct omni_wm *wm, int x, int y);
 
-/* chrome hit zones: 0 client, 1 title, 2 close, 3..9 resize edges */
+/* chrome hit zones: 0 client, 1 title, 2 close, 3..9 resize edges,
+ * 10 minimize */
 int  omni_wm_hit(struct omni_win *w, int x, int y);
 int  omni_wm_button(struct omni_wm *wm, int x, int y, int btn, int pressed);
 int  omni_wm_motion(struct omni_wm *wm, int x, int y);
 int  omni_wm_key(struct omni_wm *wm, int key, int pressed, char ch);
 
-/* redraw everything */
+/* redraw everything (clears wm->dirty). Input and protocol handling only
+ * set wm->dirty; the shell paints once per event-loop pass. */
 void omni_wm_paint(struct omni_wm *wm);
-
-void omni_win_paint_frame(struct omni_wm *wm, struct omni_win *w);
-void omni_draw_title(struct raster *r, int x, int y, int w,
-                     const char *title, int active);
 
 #endif /* OMNI_OS_GUI_WM_H */

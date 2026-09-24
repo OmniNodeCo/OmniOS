@@ -49,4 +49,22 @@ struct omni_client_event {
 
 int  omni_client_poll(struct omni_client_conn *c, struct omni_client_event *e);
 
+/* modern drawing: anti-aliased filled rounded rectangle; transparent text
+ * at 16 px (smoothed 2x) or 8 px, drawn over what is already there */
+int  omni_client_rfill(struct omni_client_conn *c, int x, int y, int w, int h,
+                       int radius, uint32_t rgb);
+int  omni_client_text2(struct omni_client_conn *c, int x, int y, uint32_t fg,
+                       const char *s);
+int  omni_client_textt(struct omni_client_conn *c, int x, int y, uint32_t fg,
+                       const char *s);
+/* sleep until an event arrives or timeout_ms passes (-1 = forever);
+ * returns > 0 if there is something to read, 0 on timeout, < 0 on error */
+/* linear gradient from -> to, left to right (or top to bottom) */
+int  omni_client_grad(struct omni_client_conn *c, int x, int y, int w, int h,
+                      uint32_t from, uint32_t to, int vertical);
+/* the rounded gradient app icon used by the taskbar and Start menu */
+int  omni_client_icon(struct omni_client_conn *c, int x, int y, int size,
+                      uint32_t rgb, char glyph);
+int  omni_client_wait(struct omni_client_conn *c, int timeout_ms);
+
 #endif /* OMNI_OS_GUI_CLIENT_H */

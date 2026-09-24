@@ -239,7 +239,7 @@ int main(void)
     /* 80x25, shrunk if the screen is small (leave room for the taskbar) */
     if (conn.screen_w > 0 && conn.screen_h > 0) {
         int maxc = (conn.screen_w - 48 - 2 * PAD) / CELL_W;
-        int maxr = (conn.screen_h - 30 - 48 - OMNI_WM_TITLE_H - 2 * PAD) / CELL_H;
+        int maxr = (conn.screen_h - OMNI_TASKBAR_H - 48 - OMNI_WM_TITLE_H - 2 * PAD) / CELL_H;
         if (cols > maxc) cols = maxc;
         if (rows > maxr) rows = maxr;
         if (cols < 20) cols = 20;

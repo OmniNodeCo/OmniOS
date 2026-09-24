@@ -13,6 +13,8 @@
 #ifndef OMNI_OS_GUI_CATALOG_H
 #define OMNI_OS_GUI_CATALOG_H
 
+#include <stdint.h>
+
 #define OMNI_APPS_STATE_DIR "/var/lib/omnios"
 #define OMNI_APPS_STATE     OMNI_APPS_STATE_DIR "/installed-apps"
 #define OMNI_CATALOG_MAX    32
@@ -25,6 +27,8 @@ struct omni_app_info {
     const char *summary;        /* one line for the store                */
     int         system;         /* part of OmniOS: cannot be removed     */
     int         preinstalled;   /* installed on a fresh system           */
+    uint32_t    color;          /* icon colour (0xRRGGBB)                */
+    char        glyph;          /* icon glyph                            */
 };
 
 extern const struct omni_app_info omni_catalog[];
@@ -32,6 +36,10 @@ extern const int omni_catalog_n;
 
 /* index of the app with this id, or -1 */
 int  omni_app_find(const char *id);
+
+/* the catalog app a window title belongs to ("OmniOS Terminal" ->
+ * Terminal, "System Information" -> System Info), or NULL */
+const struct omni_app_info *omni_app_for_title(const char *title);
 
 /* state file in use (the OMNI_APPS_STATE environment variable overrides
  * the default, for tests) */

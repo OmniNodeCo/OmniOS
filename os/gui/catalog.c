@@ -18,25 +18,43 @@
 /* Start menu order. */
 const struct omni_app_info omni_catalog[] = {
     { "terminal", "Terminal",     "/usr/bin/omnios-term",    "System",
-      "Command line with a real shell (ash).",                 1, 1 },
+      "Command line with a real shell (ash).",                 1, 1, 0x334155, '>' },
     { "files",    "File Manager", "/usr/bin/omnios-files",   "System",
-      "Browse the files on your system.",                      1, 1 },
+      "Browse the files on your system.",                      1, 1, 0xf59e0b, 'F' },
     { "edit",     "Text Editor",  "/usr/bin/omnios-edit",    "Productivity",
-      "Write and edit plain text.",                            0, 1 },
+      "Write and edit plain text.",                            0, 1, 0x0ea5e9, 'E' },
     { "calc",     "Calculator",   "/usr/bin/omnios-calc",    "Utilities",
-      "A four-function calculator.",                           0, 1 },
+      "A four-function calculator.",                           0, 1, 0x10b981, '+' },
     { "sysinfo",  "System Info",  "/usr/bin/omnios-sysinfo", "Utilities",
-      "Memory, uptime and CPU at a glance.",                   0, 1 },
+      "Memory, uptime and CPU at a glance.",                   0, 1, 0x64748b, 'i' },
     { "clock",    "Clock",        "/usr/bin/omnios-clock",   "Utilities",
-      "A big digital clock with today's date.",                0, 0 },
+      "A big digital clock with today's date.",                0, 0, 0x6366f1, 'C' },
     { "snake",    "Snake",        "/usr/bin/omnios-snake",   "Games",
-      "The classic: eat, grow, and don't bite your tail.",     0, 0 },
+      "The classic: eat, grow, and don't bite your tail.",     0, 0, 0x22c55e, 'S' },
     { "store",    "App Store",    "/usr/bin/omnios-store",   "System",
-      "Get and remove apps.",                                  1, 1 },
+      "Get and remove apps.",                                  1, 1, 0x3b82f6, 'A' },
     { "about",    "About OmniOS", "/usr/bin/omnios-about",   "System",
-      "Version and credits.",                                  1, 1 },
+      "Version and credits.",                                  1, 1, 0x8b5cf6, 'O' },
 };
 const int omni_catalog_n = (int)(sizeof(omni_catalog) / sizeof(omni_catalog[0]));
+
+const struct omni_app_info *omni_app_for_title(const char *title)
+{
+    int i;
+    if (!title || !title[0])
+        return NULL;
+    for (i = 0; i < omni_catalog_n; i++)        /* "OmniOS Terminal" */
+        if (strstr(title, omni_catalog[i].name))
+            return &omni_catalog[i];
+    for (i = 0; i < omni_catalog_n; i++) {      /* "System Information" */
+        const char *n = omni_catalog[i].name;
+        size_t k = strcspn(n, " ");
+        if (n[k] == ' ' && strncmp(title, n, k) == 0 &&
+            (title[k] == ' ' || title[k] == '\0'))
+            return &omni_catalog[i];
+    }
+    return NULL;
+}
 
 int omni_app_find(const char *id)
 {

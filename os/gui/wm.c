@@ -12,6 +12,7 @@
  * active window.
  */
 #include <errno.h>
+#include <math.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,12 +22,11 @@
 #include <sys/un.h>
 
 #include "wm.h"
+#include "theme.h"
 
 /* ------------------------------------------------------------------ */
 /* low-level helpers                                                  */
 /* ------------------------------------------------------------------ */
-
-static void paint_frame(struct omni_wm *wm, struct omni_win *w);
 
 static uint32_t parse_color(const char *s)
 {
@@ -60,46 +60,153 @@ void omni_wm_init(struct omni_wm *wm, struct raster *screen)
         wm->clients[i].fd = -1;
 }
 
-void omni_draw_title(struct raster *r, int x, int y, int w,
-                     const char *title, int active)
+/* ------------------------------------------------------------------ */
+/* window chrome                                                      */
+/* ------------------------------------------------------------------ */
+
+#define WM_RADIUS 8                 /* rounded window corners            */
+#define WM_BTN_W  46                /* caption button width              */
+
+static uint32_t win_icon(struct omni_wm *wm, const struct omni_win *w,
+                         char *glyph)
 {
-    uint32_t top    = active ? OMNI_COLOR_TITLE : OMNI_COLOR_TITLE_LO;
-    uint32_t bottom = active ? OMNI_COLOR_TITLE_LO : omni_rgb(0x35, 0x35, 0x3a);
+    uint32_t c;
+    *glyph = w->title[0] ? w->title[0] : '?';
+    c = wm->icon_for ? wm->icon_for(w->title, glyph) : 0;
+    return c ? c : TH_ACCENT;
+}
 
-    raster_gradient_v(r, x, y, w, OMNI_WM_TITLE_H, top, bottom);
-    raster_rect(r, x, y, w, OMNI_WM_TITLE_H, OMNI_COLOR_BORDER);
-
-    if (title && title[0]) {
-        struct canvas c;
-        canvas_init(&c, r, OMNI_COLOR_WHITE, top);
-        canvas_set_clip(&c, x + 6, y + 1, w - 6 - 24, OMNI_WM_TITLE_H - 2);
-        c.cellh = 8;
-        canvas_text(&c, title, x + 6, y + (OMNI_WM_TITLE_H - 8) / 2);
-    }
-
-    /* close button (X) */
-    {
-        int bx = x + w - 17, by = y + 3;
-        raster_fill(r, bx, by, 13, 13, OMNI_COLOR_BTN_BG);
-        raster_rect(r, bx, by, 13, 13, OMNI_COLOR_BORDER);
-        raster_hline(r, bx + 3, bx + 9, by + 3, OMNI_COLOR_WHITE);
-        raster_hline(r, bx + 3, bx + 9, by + 9, OMNI_COLOR_WHITE);
-        raster_vline(r, bx + 3, by + 3, by + 9, OMNI_COLOR_WHITE);
-        raster_vline(r, bx + 9, by + 3, by + 9, OMNI_COLOR_WHITE);
+/* anti-aliased diagonal cross, half-size n, centred on (cx, cy) */
+static void draw_cross(struct raster *r, int cx, int cy, int n, uint32_t c)
+{
+    int i;
+    for (i = -n; i <= n; i++) {
+        th_px(r, cx + i, cy + i, c, 255);
+        th_px(r, cx + i, cy - i, c, 255);
+        if (i < n) {                        /* soften the stair steps */
+            th_px(r, cx + i + 1, cy + i, c, 70);
+            th_px(r, cx + i, cy + i + 1, c, 70);
+            th_px(r, cx + i + 1, cy - i, c, 70);
+            th_px(r, cx + i, cy - i - 1, c, 70);
+        }
     }
 }
 
-static void paint_frame(struct omni_wm *wm, struct omni_win *w)
+/* chrome zone under the pointer, if w is the topmost window there */
+static int hover_zone(struct omni_wm *wm, struct omni_win *w)
 {
-    omni_draw_title(&wm->screen, w->x, w->y, w->w, w->title,
-                    w == wm->active);
-    raster_rect(&wm->screen, w->x, w->y + OMNI_WM_TITLE_H,
-                w->w, w->h - OMNI_WM_TITLE_H, OMNI_COLOR_BORDER);
+    if (omni_wm_at(wm, wm->pointer_x, wm->pointer_y) != w)
+        return 0;
+    return omni_wm_hit(w, wm->pointer_x, wm->pointer_y);
 }
 
-void omni_win_paint_frame(struct omni_wm *wm, struct omni_win *w)
+/* corner square k (0 TL, 1 TR, 2 BL, 3 BR) origin */
+static void corner_origin(const struct omni_win *w, int k, int *ox, int *oy)
 {
-    paint_frame(wm, w);
+    *ox = (k & 1) ? w->x + w->w - WM_RADIUS : w->x;
+    *oy = (k & 2) ? w->y + w->h - WM_RADIUS : w->y;
+}
+
+static void paint_window(struct omni_wm *wm, struct omni_win *w, int active)
+{
+    struct raster *s = &wm->screen;
+    const int R = WM_RADIUS, T = OMNI_WM_TITLE_H;
+    uint32_t under[4][WM_RADIUS * WM_RADIUS];
+    uint32_t ink = active ? TH_TITLE_TEXT : TH_TITLE_TEXT_2;
+    unsigned edge = active ? 64 : 44;           /* outline darkness      */
+    int bx_close = w->x + w->w - WM_BTN_W, bx_min = bx_close - WM_BTN_W;
+    int hz = hover_zone(wm, w);
+    int k, i, j, dy, src_y, src_h;
+    char glyph;
+    uint32_t icon = win_icon(wm, w, &glyph);
+
+    /* 1. soft drop shadow, deeper for the active window */
+    if (active)
+        th_shadow(s, w->x, w->y, w->w, w->h, R, 22, 7, 110);
+    else
+        th_shadow(s, w->x, w->y, w->w, w->h, R, 12, 3, 60);
+
+    /* 2. remember what the rounded corners will let show through */
+    for (k = 0; k < 4; k++) {
+        int ox, oy;
+        corner_origin(w, k, &ox, &oy);
+        for (j = 0; j < R; j++)
+            for (i = 0; i < R; i++) {
+                int xx = ox + i, yy = oy + j;
+                under[k][j * R + i] =
+                    (xx >= 0 && yy >= 0 && xx < s->w && yy < s->h)
+                        ? s->bits[(size_t)yy * (size_t)s->stride + (size_t)xx] : 0;
+            }
+    }
+
+    /* 3. title bar: app icon, title, minimize + close caption buttons */
+    th_fill_a(s, w->x, w->y, w->w, T, active ? TH_TITLE_ACTIVE : TH_TITLE_IDLE, 255);
+    th_icon(s, w->x + 10, w->y + (T - 16) / 2, 16, icon, glyph);
+    th_text_clip(s, w->title, w->x + 34, w->y + (T - 8) / 2, ink,
+                 bx_min - (w->x + 34) - 6);
+    if (hz == 10)
+        th_fill_a(s, bx_min, w->y, WM_BTN_W, T, TH_CAPTION_HOVER, 255);
+    if (hz == 2)
+        th_fill_a(s, bx_close, w->y, WM_BTN_W, T, TH_CLOSE_HOVER, 255);
+    th_fill_a(s, bx_min + WM_BTN_W / 2 - 5, w->y + T / 2, 11, 1, ink, 255);
+    draw_cross(s, bx_close + WM_BTN_W / 2, w->y + T / 2, 5,
+               hz == 2 ? 0xffffff : ink);
+    th_fill_a(s, w->x, w->y + T - 1, w->w, 1, 0x000000, 18);   /* separator */
+
+    /* 4. client area from the backing store (windows resized larger than
+     * their surface get a neutral fill instead of showing through) */
+    dy = w->y + T;
+    src_y = 0;
+    src_h = w->h - T;
+    if (dy < 0) {
+        src_y = -dy;
+        src_h -= src_y;
+        dy = 0;
+    }
+    if (src_h > 0) {
+        raster_blit_clip(s, &w->surface, w->x, dy, 0, src_y, w->w, src_h);
+        if (w->w > w->surface.w)
+            th_fill_a(s, w->x + w->surface.w, dy, w->w - w->surface.w, src_h,
+                      0xf3f4f6, 255);
+        if (src_y + src_h > w->surface.h) {
+            int top = w->surface.h - src_y;
+            if (top < 0) top = 0;
+            th_fill_a(s, w->x, dy + top, w->w, src_h - top, 0xf3f4f6, 255);
+        }
+    }
+
+    /* 5. hairline outline (straight parts; the arcs are done below) */
+    th_fill_a(s, w->x + R, w->y, w->w - 2 * R, 1, 0x000000, edge);
+    th_fill_a(s, w->x + R, w->y + w->h - 1, w->w - 2 * R, 1, 0x000000, edge);
+    th_fill_a(s, w->x, w->y + R, 1, w->h - 2 * R, 0x000000, edge);
+    th_fill_a(s, w->x + w->w - 1, w->y + R, 1, w->h - 2 * R, 0x000000, edge);
+
+    /* 6. round the corners: outline arc, then blend with what was below */
+    for (k = 0; k < 4; k++) {
+        int ox, oy;
+        corner_origin(w, k, &ox, &oy);
+        for (j = 0; j < R; j++)
+            for (i = 0; i < R; i++) {
+                int xx = ox + i, yy = oy + j;
+                int cx = (k & 1) ? R - 1 - i : i;   /* mirror to top-left */
+                int cy = (k & 2) ? R - 1 - j : j;
+                unsigned cov, ring;
+                uint32_t *p, pix;
+                float fx, fy, d;
+
+                if (xx < 0 || yy < 0 || xx >= s->w || yy >= s->h)
+                    continue;
+                cov = th_corner_cov(cx, cy, R);
+                p = s->bits + (size_t)yy * (size_t)s->stride + (size_t)xx;
+                fx = (float)R - ((float)cx + 0.5f);
+                fy = (float)R - ((float)cy + 0.5f);
+                d = sqrtf(fx * fx + fy * fy) - ((float)R - 0.5f);
+                d = d < 0 ? -d : d;
+                ring = d < 1.0f ? (unsigned)((1.0f - d) * (float)edge) : 0;
+                pix = th_blend(*p, 0x000000, ring);
+                *p = th_blend(under[k][j * R + i], pix, cov);
+            }
+    }
 }
 
 struct omni_win *omni_wm_add(struct omni_wm *wm, const char *title,
@@ -125,8 +232,8 @@ struct omni_win *omni_wm_add(struct omni_wm *wm, const char *title,
     win->y = y;
     win->w = w;
     win->h = h;
-    win->minw = 120;
-    win->minh = OMNI_WM_TITLE_H + 24;
+    win->minw = 200;
+    win->minh = OMNI_WM_TITLE_H + 40;
     snprintf(win->title, sizeof(win->title), "%s", title ? title : "");
 
     win->surface.bits = calloc((size_t)w * (size_t)h, sizeof(uint32_t));
@@ -147,6 +254,15 @@ struct omni_win *omni_wm_add(struct omni_wm *wm, const char *title,
     return win;
 }
 
+static struct omni_win *topmost_visible(struct omni_wm *wm)
+{
+    int i;
+    for (i = 0; i < wm->nwin; i++)
+        if (!wm->order[i]->minimized)
+            return wm->order[i];
+    return NULL;
+}
+
 void omni_wm_close(struct omni_wm *wm, struct omni_win *w)
 {
     int i, j;
@@ -163,14 +279,24 @@ void omni_wm_close(struct omni_wm *wm, struct omni_win *w)
     memset(w, 0, sizeof(*w));
 
     if (wm->active == w)
-        wm->active = wm->nwin ? wm->order[0] : NULL;
+        wm->active = topmost_visible(wm);
+    wm->dirty = 1;
+}
+
+void omni_wm_minimize(struct omni_wm *wm, struct omni_win *w)
+{
+    w->minimized = 1;
+    if (wm->active == w)
+        wm->active = topmost_visible(wm);
+    wm->dirty = 1;
 }
 
 void omni_wm_raise(struct omni_wm *wm, struct omni_win *w)
 {
     int i;
-    if (wm->order[0] == w)
-        return;
+    w->minimized = 0;
+    wm->active = w;
+    wm->dirty = 1;
     for (i = 0; i < wm->nwin; i++) {
         if (wm->order[i] == w) {
             memmove(&wm->order[1], &wm->order[0],
@@ -196,6 +322,8 @@ struct omni_win *omni_wm_at(struct omni_wm *wm, int x, int y)
     int i;
     for (i = 0; i < wm->nwin; i++) {
         struct omni_win *w = wm->order[i];
+        if (w->minimized)
+            continue;
         if (x >= w->x && x < w->x + w->w &&
             y >= w->y && y < w->y + w->h)
             return w;
@@ -205,23 +333,21 @@ struct omni_win *omni_wm_at(struct omni_wm *wm, int x, int y)
 
 int omni_wm_hit(struct omni_win *w, int x, int y)
 {
-    const int E = 6;
+    const int E = 5, T = OMNI_WM_TITLE_H;
     int rx = x - w->x, ry = y - w->y;
 
     if (rx < 0 || ry < 0 || rx >= w->w || ry >= w->h)
         return 0;
 
-    if (rx >= w->w - 19 && rx < w->w - 4 && ry >= 2 && ry < 17)
-        return 2;
-
-    if (ry < OMNI_WM_TITLE_H)
-        return 1;
+    /* caption buttons take precedence over the top-right corner */
+    if (ry < T && rx >= w->w - WM_BTN_W)        return 2;
+    if (ry < T && rx >= w->w - 2 * WM_BTN_W)    return 10;
 
     if (rx < E && ry < E)                       return 3;
-    if (rx >= w->w - E && ry < E)               return 9;
     if (rx < E && ry >= w->h - E)               return 7;
     if (rx >= w->w - E && ry >= w->h - E)       return 5;
     if (rx < E)                                 return 4;
+    if (ry < T)                                 return 1;
     if (rx >= w->w - E)                         return 6;
     if (ry >= w->h - E)                         return 8;
 
@@ -235,6 +361,8 @@ int omni_wm_button(struct omni_wm *wm, int x, int y, int btn, int pressed)
         int zone;
 
         if (!w) {
+            if (wm->active)
+                wm->dirty = 1;
             wm->active = NULL;
             return 0;
         }
@@ -249,7 +377,11 @@ int omni_wm_button(struct omni_wm *wm, int x, int y, int btn, int pressed)
                 wm->clients[w->client].fd >= 0)
                 send_word(wm->clients[w->client].fd, "CLOSE", w->id, 0, 0);
             omni_wm_close(wm, w);
-            omni_wm_paint(wm);
+            return 0;
+        }
+        if (zone == 10) {
+            wm->button_down = 0;
+            omni_wm_minimize(wm, w);
             return 0;
         }
         if (zone == 1 || zone >= 3) {
@@ -344,7 +476,7 @@ int omni_wm_motion(struct omni_wm *wm, int x, int y)
     default:
         break;
     }
-    omni_wm_paint(wm);
+    wm->dirty = 1;
     return 1;
 }
 
@@ -376,25 +508,13 @@ void omni_wm_paint(struct omni_wm *wm)
 
     for (i = wm->nwin - 1; i >= 0; i--) {
         struct omni_win *w = wm->order[i];
-        int dy = w->y + OMNI_WM_TITLE_H;
-        int src_y = 0;
-        int src_h = w->h - OMNI_WM_TITLE_H;
-
-        if (dy < 0) {
-            src_y = -dy;
-            src_h -= src_y;
-            dy = 0;
-        }
-        if (src_h > 0)
-            raster_blit_clip(&wm->screen, &w->surface,
-                             w->x, dy, 0, src_y, w->w, src_h);
-        paint_frame(wm, w);
+        if (!w->minimized)
+            paint_window(wm, w, w == wm->active);
     }
 
-    /* last step of the frame: shell chrome (taskbar/menu/cursor) plus any
-     * device presentation work (e.g. the horizontal mirror some hosts
-     * need).  Without this hook the shell's own redraw would duplicate the
-     * chrome and the mirror would only run on a subset of frames. */
+    /* last step of the frame: the shell draws its chrome (taskbar, Start
+     * menu, banner) into the scene and presents the changed blocks to the
+     * device. */
     if (wm->finish)
         wm->finish(wm);
 }
@@ -501,8 +621,9 @@ static int handle_line(struct omni_wm *wm, int ci, const char *line)
 
     if (strcmp(m.verb, "OPEN") == 0) {
         long w = m.num[0], h = m.num[1];
-        int x = 40 + (ci * 24) % 200;
-        int y = 40 + (ci * 24) % 160;
+        int step = ci % 6;
+        int x = (wm->screen.w - (int)w) / 2 - 70 + step * 28;
+        int y = (wm->screen.h - OMNI_TASKBAR_H - (int)h) / 2 - 50 + step * 26;
         struct omni_win *win;
 
         if (m.n < 2 || w <= 0 || h <= 0) {
@@ -513,6 +634,11 @@ static int handle_line(struct omni_wm *wm, int ci, const char *line)
             send_line(cl->fd, "ERR client already has a window\n");
             return 0;
         }
+        if (x + w > wm->screen.w - 8) x = wm->screen.w - 8 - (int)w;
+        if (y + h > wm->screen.h - OMNI_TASKBAR_H - 4)
+            y = wm->screen.h - OMNI_TASKBAR_H - 4 - (int)h;
+        if (x < 8) x = 8;
+        if (y < 8) y = 8;
         win = omni_wm_add(wm, m.text[0] ? m.text : "OmniOS window",
                           x, y, (int)w, (int)h);
         if (!win) {
@@ -526,13 +652,13 @@ static int handle_line(struct omni_wm *wm, int ci, const char *line)
             proto_build(out, sizeof(out), "OK", 1, num);
             send_line(cl->fd, out);
         }
-        omni_wm_paint(wm);
+        wm->dirty = 1;
         return 0;
     }
 
     if (strcmp(m.verb, "CLOSE") == 0 || strcmp(m.verb, "QUIT") == 0) {
         drop_client(wm, ci);
-        omni_wm_paint(wm);
+        wm->dirty = 1;
         return (strcmp(m.verb, "QUIT") == 0) ? 1 : 0;
     }
 
@@ -542,7 +668,8 @@ static int handle_line(struct omni_wm *wm, int ci, const char *line)
     }
 
     if (strcmp(m.verb, "TITLE") == 0) {
-        snprintf(cl->win->title, sizeof(cl->win->title), "%s", m.text);
+        snprintf(cl->win->title, sizeof(cl->win->title), "%.*s",
+                 (int)sizeof(cl->win->title) - 1, m.text);
         wm->dirty = 1;
     } else if (strcmp(m.verb, "RAISE") == 0) {
         omni_wm_raise(wm, cl->win);
@@ -559,6 +686,66 @@ static int handle_line(struct omni_wm *wm, int ci, const char *line)
         c = parse_color(m.text);
         raster_fill(s, (int)m.num[1], (int)m.num[2],
                     (int)m.num[3], (int)m.num[4], c);
+        wm->dirty = 1;
+    } else if (strcmp(m.verb, "RFILL") == 0) {
+        /* RFILL win x y w h radius color: anti-aliased rounded rect */
+        struct raster *s = &cl->win->surface;
+        int rw, rh, rad;
+        if (m.n < 6) { send_line(cl->fd, "ERR RFILL x y w h radius color\n"); return 0; }
+        rw = (int)m.num[3]; rh = (int)m.num[4]; rad = (int)m.num[5];
+        if (rad > rw / 2) rad = rw / 2;
+        if (rad > rh / 2) rad = rh / 2;
+        if (rad < 0) rad = 0;
+        th_round_rect(s, (int)m.num[1], (int)m.num[2], rw, rh, rad,
+                      parse_color(m.text) & 0xffffff, 255);
+        wm->dirty = 1;
+    } else if (strcmp(m.verb, "GRAD") == 0) {
+        /* GRAD win x y w h c0 c1 vertical: linear gradient (decimal
+         * colours) -- one message instead of dozens of FILL bands */
+        struct raster *s = &cl->win->surface;
+        int gx, gy, gw, gh, vert, i, j, i0, i1, j0, j1, span;
+        uint32_t c0, c1;
+        if (m.n < 8) { send_line(cl->fd, "ERR GRAD x y w h c0 c1 vertical\n"); return 0; }
+        gx = (int)m.num[1]; gy = (int)m.num[2]; gw = (int)m.num[3]; gh = (int)m.num[4];
+        c0 = (uint32_t)m.num[5] & 0xffffff;
+        c1 = (uint32_t)m.num[6] & 0xffffff;
+        vert = m.num[7] != 0;
+        span = (vert ? gh : gw) - 1;
+        i0 = gx < 0 ? -gx : 0;  i1 = gw < s->w - gx ? gw : s->w - gx;   /* clip */
+        j0 = gy < 0 ? -gy : 0;  j1 = gh < s->h - gy ? gh : s->h - gy;
+        for (j = j0; j < j1; j++) {
+            uint32_t *row = s->bits + (size_t)(gy + j) * (size_t)s->stride + gx;
+            for (i = i0; i < i1; i++) {
+                int k = vert ? j : i;
+                unsigned t = span > 0 ? (unsigned)((long)k * 255 / span) : 0;
+                row[i] = 0xff000000u | (th_blend(c0, c1, t) & 0xffffff);
+            }
+        }
+        wm->dirty = 1;
+    } else if (strcmp(m.verb, "ICON") == 0) {
+        /* ICON win x y size rgb glyph: the gradient app icon of the
+         * taskbar and Start menu (rgb decimal, glyph an ASCII code) */
+        int size;
+        char glyph;
+        if (m.n < 6) { send_line(cl->fd, "ERR ICON x y size rgb glyph\n"); return 0; }
+        size = (int)m.num[3];
+        glyph = (char)(m.num[5] & 0x7f);
+        if (size < 8) size = 8;
+        if (size > 128) size = 128;
+        th_icon(&cl->win->surface, (int)m.num[1], (int)m.num[2], size,
+                (uint32_t)m.num[4] & 0xffffff, glyph >= 32 ? glyph : '?');
+        wm->dirty = 1;
+    } else if (strcmp(m.verb, "TEXT2") == 0 || strcmp(m.verb, "TEXTT") == 0) {
+        /* TEXT2 win x y fg text: 16 px smoothed text; TEXTT: 8 px.
+         * Both transparent (drawn over what is there). */
+        struct raster *s = &cl->win->surface;
+        uint32_t fg;
+        if (m.n < 4) { send_line(cl->fd, "ERR TEXT2/TEXTT x y fg text\n"); return 0; }
+        fg = (uint32_t)m.num[3] & 0xffffff;
+        if (m.verb[4] == '2')
+            th_text2x(s, m.text, (int)m.num[1], (int)m.num[2], fg);
+        else
+            th_text(s, m.text, (int)m.num[1], (int)m.num[2], fg);
         wm->dirty = 1;
     } else if (strcmp(m.verb, "RECT") == 0) {
         struct raster *s = &cl->win->surface;
@@ -614,12 +801,12 @@ int omni_wm_handle_client(struct omni_wm *wm, int ci)
             if (errno == EAGAIN || errno == EWOULDBLOCK)
                 break;
             drop_client(wm, ci);
-            omni_wm_paint(wm);
+            wm->dirty = 1;
             return -1;
         }
         if (n == 0) {          /* EOF */
             drop_client(wm, ci);
-            omni_wm_paint(wm);
+            wm->dirty = 1;
             return -1;
         }
 
@@ -629,7 +816,7 @@ int omni_wm_handle_client(struct omni_wm *wm, int ci)
                 cl->rxlen = 0;
                 if (handle_line(wm, ci, cl->rx) == 1) {
                     drop_client(wm, ci);
-                    omni_wm_paint(wm);
+                    wm->dirty = 1;
                     return -1;
                 }
             } else if (cl->rxlen < OMNI_PROTO_MAX_LINE - 1) {
@@ -637,7 +824,7 @@ int omni_wm_handle_client(struct omni_wm *wm, int ci)
             } else {
                 /* overlong line: drop the misbehaving client */
                 drop_client(wm, ci);
-                omni_wm_paint(wm);
+                wm->dirty = 1;
                 return -1;
             }
         }
