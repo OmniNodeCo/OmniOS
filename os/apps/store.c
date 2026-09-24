@@ -26,7 +26,7 @@
 
 #define WIN_W     600
 #define WIN_H     520
-#define HEADER_H  52
+#define HEADER_H  64
 #define LIST_Y    (HEADER_H + 4)
 #define ROW_H     44
 #define FOOTER_H  28
@@ -34,21 +34,22 @@
 #define BTN_H     24
 #define BTN_X     (WIN_W - 16 - BTN_W)
 
-#define C_HEADER  0x1b59a0
-#define C_HEAD_2  0xcfe0f5
+#define C_HEADER  0x2563eb
+#define C_HEADER_2 0x184098         /* gradient end: C_HEADER at 65 % */
+#define C_HEAD_2  0xdbe6ff
 #define C_WHITE   0xffffff
-#define C_SELECT  0xe3eefc
-#define C_RULE    0xe6e6e6
-#define C_INK     0x101010
-#define C_META    0x6a737d
-#define C_SUMMARY 0x444c56
-#define C_GET     0x2d7dd2
-#define C_GET_LO  0xdce8f7
-#define C_REMOVE  0xe9ecef
-#define C_BORDER  0xb8bfc6
-#define C_FOOTER  0xf0f0f0
-#define C_FOOT_TX 0x404040
-#define C_GONE    0xa0a0a0
+#define C_SELECT  0xe8f0fe
+#define C_RULE    0xeceef2
+#define C_INK     0x1f2937
+#define C_META    0x6b7280
+#define C_SUMMARY 0x4b5563
+#define C_GET     0x2563eb
+#define C_GET_LO  0xdbe6ff
+#define C_REMOVE  0xf3f4f6
+#define C_BORDER  0xd1d5db
+#define C_FOOTER  0xf8fafc
+#define C_FOOT_TX 0x4b5563
+#define C_GONE    0x9ca3af
 
 enum { K_ESC = 1, K_ENTER = 28, K_SPACE = 57, K_KPENTER = 96, K_HOME = 102,
        K_UP = 103, K_PGUP = 104, K_END = 107, K_DOWN = 108, K_PGDN = 109,
@@ -141,14 +142,6 @@ static int store_count(const struct store *s, int installed)
 /* drawing                                                            */
 /* ------------------------------------------------------------------ */
 
-static uint32_t category_color(const char *cat)
-{
-    if (strcmp(cat, "Productivity") == 0) return 0x2e9d57;
-    if (strcmp(cat, "Utilities") == 0)    return 0xd9822b;
-    if (strcmp(cat, "Games") == 0)        return 0x8e44ad;
-    return 0x5a6b7d;                                      /* System */
-}
-
 static void draw_button(struct omni_client_conn *c, struct store *s, int i,
                         int y, uint32_t rowbg)
 {
@@ -158,14 +151,12 @@ static void draw_button(struct omni_client_conn *c, struct store *s, int i,
     } else if (!app_present(i)) {
         omni_client_textc(c, BTN_X + 6, by + 8, C_GONE, rowbg, "Unavailable");
     } else if (s->installed[i]) {
-        omni_client_fill(c, BTN_X, by, BTN_W, BTN_H, C_REMOVE);
-        omni_client_rect(c, BTN_X, by, BTN_W, BTN_H, C_BORDER);
-        omni_client_textc(c, BTN_X + (BTN_W - 6 * 8) / 2, by + 8, C_INK,
-                          C_REMOVE, "Remove");
+        omni_client_rfill(c, BTN_X, by, BTN_W, BTN_H, 6, C_BORDER);
+        omni_client_rfill(c, BTN_X + 1, by + 1, BTN_W - 2, BTN_H - 2, 5, C_REMOVE);
+        omni_client_textt(c, BTN_X + (BTN_W - 6 * 8) / 2, by + 8, C_INK, "Remove");
     } else {
-        omni_client_fill(c, BTN_X, by, BTN_W, BTN_H, C_GET);
-        omni_client_textc(c, BTN_X + (BTN_W - 3 * 8) / 2, by + 8, C_WHITE,
-                          C_GET, "Get");
+        omni_client_rfill(c, BTN_X, by, BTN_W, BTN_H, 6, C_GET);
+        omni_client_textt(c, BTN_X + (BTN_W - 3 * 8) / 2, by + 8, C_WHITE, "Get");
     }
 }
 
@@ -173,20 +164,21 @@ static void draw_row(struct omni_client_conn *c, struct store *s, int i, int y)
 {
     const struct omni_app_info *a = &omni_catalog[i];
     uint32_t bg = (i == s->sel) ? C_SELECT : C_WHITE;
-    uint32_t ic = category_color(a->category);
-    char initial[2] = { a->name[0], 0 }, meta[64], size[32];
+    char meta[64], size[32];
 
-    omni_client_fill(c, 0, y, WIN_W, ROW_H, bg);
-    omni_client_fill(c, 16, y + 8, 28, 28, ic);                 /* icon */
-    omni_client_textc(c, 16 + 10, y + 18, C_WHITE, ic, initial);
-    omni_client_textc(c, 56, y + 9, C_INK, bg, a->name);
+    omni_client_fill(c, 0, y, WIN_W, ROW_H, C_WHITE);
+    if (i == s->sel)                               /* inset highlight */
+        omni_client_rfill(c, 6, y + 2, WIN_W - 12, ROW_H - 4, 8, C_SELECT);
+    else
+        omni_client_fill(c, 60, y + ROW_H - 1, WIN_W - 76, 1, C_RULE);
+    omni_client_icon(c, 16, y + 6, 32, a->color, a->glyph);   /* icon */
+    omni_client_textt(c, 60, y + 10, C_INK, a->name);
     size_text(i, size, sizeof(size));
     snprintf(meta, sizeof(meta), "%s - %s", a->category, size);
-    omni_client_textc(c, 56 + ((int)strlen(a->name) + 2) * 8, y + 9,
-                      C_META, bg, meta);
-    omni_client_textc(c, 56, y + 25, C_SUMMARY, bg, a->summary);
+    omni_client_textt(c, 60 + ((int)strlen(a->name) + 2) * 8, y + 10,
+                      C_META, meta);
+    omni_client_textt(c, 60, y + 26, C_SUMMARY, a->summary);
     draw_button(c, s, i, y, bg);
-    omni_client_fill(c, 0, y + ROW_H - 1, WIN_W, 1, C_RULE);
 }
 
 static void store_draw(struct omni_client_conn *c, struct store *s)
@@ -194,11 +186,11 @@ static void store_draw(struct omni_client_conn *c, struct store *s)
     char sub[96];
     int r, list_h = s->rows * ROW_H;
 
-    omni_client_fill(c, 0, 0, WIN_W, HEADER_H, C_HEADER);
-    omni_client_textc(c, 16, 12, C_WHITE, C_HEADER, "OmniOS App Store");
+    omni_client_grad(c, 0, 0, WIN_W, HEADER_H, C_HEADER, C_HEADER_2, 0);
+    omni_client_text2(c, 18, 16, C_WHITE, "App Store");
     snprintf(sub, sizeof(sub), "%d apps installed, %d more to get",
              store_count(s, 1), store_count(s, 0));
-    omni_client_textc(c, 16, 30, C_HEAD_2, C_HEADER, sub);
+    omni_client_textt(c, 18, 42, C_HEAD_2, sub);
 
     omni_client_fill(c, 0, HEADER_H, WIN_W, s->h - HEADER_H, C_WHITE);
     for (r = 0; r < s->rows && s->top + r < omni_catalog_n; r++)
@@ -206,7 +198,7 @@ static void store_draw(struct omni_client_conn *c, struct store *s)
 
     omni_client_fill(c, 0, s->h - FOOTER_H, WIN_W, FOOTER_H, C_FOOTER);
     omni_client_fill(c, 0, s->h - FOOTER_H, WIN_W, 1, C_RULE);
-    omni_client_textc(c, 12, s->h - FOOTER_H + 10, C_FOOT_TX, C_FOOTER,
+    omni_client_textt(c, 16, s->h - FOOTER_H + 10, C_FOOT_TX,
                       s->status[0] ? s->status
                       : "Up/Down select - Enter get/remove - Del remove - Esc close");
     (void)list_h;
@@ -218,8 +210,8 @@ static void animate_install(struct omni_client_conn *c, struct store *s)
     int by = LIST_Y + (s->sel - s->top) * ROW_H + (ROW_H - BTN_H) / 2;
     int step;
     for (step = 1; step <= 10; step++) {
-        omni_client_fill(c, BTN_X, by, BTN_W, BTN_H, C_GET_LO);
-        omni_client_fill(c, BTN_X, by, BTN_W * step / 10, BTN_H, C_GET);
+        omni_client_rfill(c, BTN_X, by, BTN_W, BTN_H, 6, C_GET_LO);
+        omni_client_rfill(c, BTN_X, by, BTN_W * step / 10, BTN_H, 6, C_GET);
         usleep(35000);
     }
 }
