@@ -93,6 +93,8 @@ int  omni_wm_handle_client(struct omni_wm *wm, int ci);
 struct omni_win *omni_wm_add(struct omni_wm *wm, const char *title,
                              int x, int y, int w, int h);
 void omni_wm_close(struct omni_wm *wm, struct omni_win *w);
+/* as the window's X button: the app is told (CLOSE), then it goes */
+void omni_wm_request_close(struct omni_wm *wm, struct omni_win *w);
 /* raise + focus (also restores a minimized window) */
 void omni_wm_raise(struct omni_wm *wm, struct omni_win *w);
 void omni_wm_minimize(struct omni_wm *wm, struct omni_win *w);

@@ -283,6 +283,15 @@ void omni_wm_close(struct omni_wm *wm, struct omni_win *w)
     wm->dirty = 1;
 }
 
+/* the X button: tell the owning app its window closed, then destroy it */
+void omni_wm_request_close(struct omni_wm *wm, struct omni_win *w)
+{
+    if (w->client >= 0 && w->client < OMNI_WM_MAX_CLI &&
+        wm->clients[w->client].fd >= 0)
+        send_word(wm->clients[w->client].fd, "CLOSE", w->id, 0, 0);
+    omni_wm_close(wm, w);
+}
+
 void omni_wm_minimize(struct omni_wm *wm, struct omni_win *w)
 {
     w->minimized = 1;
@@ -402,11 +411,7 @@ int omni_wm_button(struct omni_wm *wm, int x, int y, int btn, int pressed)
         zone = omni_wm_hit(w, x, y);
 
         if (zone == 2) {
-            /* deliver window-close to owning client then destroy */
-            if (w->client >= 0 && w->client < OMNI_WM_MAX_CLI &&
-                wm->clients[w->client].fd >= 0)
-                send_word(wm->clients[w->client].fd, "CLOSE", w->id, 0, 0);
-            omni_wm_close(wm, w);
+            omni_wm_request_close(wm, w);
             return 0;
         }
         if (zone == 10) {
