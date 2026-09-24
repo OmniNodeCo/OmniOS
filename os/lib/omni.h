@@ -130,6 +130,8 @@ struct omni_devs {
 };
 
 void omni_devs_open(struct omni_devs *d);
+/* one rescan pass; call repeatedly until a pointer + keyboard exist */
+void omni_devs_rescan(struct omni_devs *d);
 void omni_devs_close(struct omni_devs *d);
 int  omni_devs_nfds(struct omni_devs *d);
 void omni_devs_fill(struct omni_devs *d, struct pollfd *pfds);

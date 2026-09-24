@@ -232,8 +232,10 @@ static int evdev_has_bit(struct omni_devs *d, int type, int bit)
  *   /dev/input/mice  only if no evdev device carries the pointer,
  *   /dev/tty         only if no evdev device carries the keyboard.
  * A legacy source opened on an earlier pass is closed again as soon
- * as its evdev equivalent appears (USB mice can enumerate after boot). */
-static void omni_devs_open_once(struct omni_devs *d)
+ * as its evdev equivalent appears (USB mice can enumerate after boot).
+ * Public: the desktop's main loop keeps calling it every couple of
+ * seconds until a pointer and a keyboard have both been found.  */
+void omni_devs_rescan(struct omni_devs *d)
 {
     int i;
     char path[64];
@@ -296,7 +298,7 @@ void omni_devs_open(struct omni_devs *d)
         d->ev_fd[i] = -1;
 
     for (try = 0; try < 20; try++) {
-        omni_devs_open_once(d);
+        omni_devs_rescan(d);
         if ((d->ev_has_rel || d->mice_fd >= 0) &&
             (d->ev_has_kbd || d->tty_fd >= 0))
             break;

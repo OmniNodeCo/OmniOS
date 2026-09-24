@@ -445,6 +445,21 @@ void omni_shell_run(void)
     nfds_dev = omni_devs_nfds(&devs);
     omni_devs_fill(&devs, &pfds[1]);
 
+    /* report which input sources were found (lands in the serial log,
+     * which is the fastest way to see why the mouse/keyboard are or
+     * are not alive) */
+    {
+        char ibuf[128];
+        const char *iptr = devs.ev_has_rel ? "evdev"
+                        : (devs.mice_fd >= 0 ? "/dev/input/mice" : "NONE");
+        const char *ikbd = devs.ev_has_kbd ? "evdev"
+                        : (devs.tty_fd >= 0 ? "/dev/tty" : "NONE");
+        snprintf(ibuf, sizeof(ibuf),
+                 "desktop: input: evdev=%d pointer=%s keyboard=%s\n",
+                 devs.ev_n, iptr, ikbd);
+        omni_console_puts(ibuf);
+    }
+
     /* index 0 = display socket listener */
     pfds[0].fd = omni_wm_fd(&g_wm);
     pfds[0].events = POLLIN;
@@ -458,12 +473,29 @@ void omni_shell_run(void)
     /* first paint (wallpaper + welcome window + chrome + cursor) */
     omni_wm_paint(&g_wm);
 
-    for (;;) {
+    {
+        static time_t last_rescan = 0;
+
+        for (;;) {
         time_t t = time(NULL);
         struct tm tmv;
         int redraw = 0;
         struct omni_input e;
         int ci;
+
+        /* a pointer or keyboard may appear only after the boot-time
+         * scan (late USB enumeration, hypervisor quirks): keep
+         * rescanning every 2 s until both sources exist, then stop. */
+        if ((devs.ev_has_rel == 0 && devs.mice_fd < 0) ||
+            (devs.ev_has_kbd == 0 && devs.tty_fd < 0)) {
+            if (t - last_rescan >= 2) {
+                last_rescan = t;
+                omni_devs_rescan(&devs);
+                omni_devs_fill(&devs, &pfds[1]);
+                nfds_dev = omni_devs_nfds(&devs);
+                nfds = 1 + nfds_dev;
+            }
+        }
 
         if (poll(pfds, (nfds_t)nfds, 120) < 0)
             continue;
@@ -520,7 +552,8 @@ void omni_shell_run(void)
         if (redraw)
             omni_wm_paint(&g_wm);            /* wallpaper + windows +
                                                 chrome + cursor (hook) */
-    }
+        }
+        }   /* rescan scope */
 
     omni_devs_close(&devs);
     osfb_close(&fb);
