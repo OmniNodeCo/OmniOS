@@ -110,7 +110,8 @@ def main():
                 "LABEL omnios\n"
                 "  MENU LABEL OmniOS %s\n"
                 "  LINUX /boot/omnios-bzImage\n"
-                "  APPEND console=tty1 console=ttyS0,115200n8 quiet\n"
+                # no APPEND: the kernel's built-in command line (consoles,
+                # quiet) is the same for BIOS and UEFI boots
                 % VERSION)
 
     with open(os.path.join(stage, "README.txt"), "w") as f:

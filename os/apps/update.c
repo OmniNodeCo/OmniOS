@@ -75,7 +75,7 @@
 #define DOWNLOAD_MAX  (45 * 60)         /* s a download may take at most  */
 /* the kernel's built-in command line (CONFIG_CMDLINE): the new kernel adds
  * its own copy, so it is not passed along twice */
-#define BUILTIN_CMDLINE "console=ttyS0,115200n8 console=tty1"
+#define BUILTIN_CMDLINE "console=ttyS0,115200n8 console=tty1 quiet"
 
 #ifndef KEXEC_FILE_NO_INITRAMFS
 #define KEXEC_FILE_NO_INITRAMFS 0x00000004

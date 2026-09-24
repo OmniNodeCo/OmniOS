@@ -187,7 +187,7 @@ stage_rootfs() {
 
 stage_kernel() {
     log "configuring and building the Linux kernel…"
-    require gcc make perl python3 flex bison
+    require gcc make perl python3 flex bison zstd
     # bc comes from our pinned in-tree build (src/bc), not the PATH
     [ -x "$SRC/bc/bin/bc" ] || die "bc not built yet: run scripts/build.sh toolchain"
     stage_musl
@@ -203,15 +203,24 @@ stage_kernel() {
         make ARCH=x86_64 x86_64_defconfig >/dev/null
         ./scripts/kconfig/merge_config.sh -m .config \
             "$ROOT/tools/config/override.config" >/dev/null
-        # embed the assembled rootfs as the initramfs
+        # Embed the assembled rootfs as the initramfs, uncompressed: the
+        # whole kernel image is compressed (zstd, override.config) anyway,
+        # and compressing the initramfs inside it as well only adds a
+        # second pass to unpack at boot.
         ./scripts/config --file .config \
             --set-str INITRAMFS_SOURCE "$BLD/rootfs" \
-            --enable INITRAMFS_COMPRESSION_GZIP
+            --disable INITRAMFS_COMPRESSION_GZIP \
+            --enable INITRAMFS_COMPRESSION_NONE
         make ARCH=x86_64 olddefconfig >/dev/null
         # OmniOS Update needs these (a warning: the OS boots without them)
         for opt in KEXEC_FILE E1000 VMXNET3; do
             grep -q "^CONFIG_$opt=y" .config || warn "  kernel: CONFIG_$opt is off"
         done
+        # what makes the boot fast (a warning: the OS boots without them)
+        for opt in KERNEL_ZSTD INITRAMFS_COMPRESSION_NONE; do
+            grep -q "^CONFIG_$opt=y" .config || warn "  kernel: CONFIG_$opt is off"
+        done
+        grep -q '^CONFIG_CMDLINE=".* quiet"' .config || warn "  kernel: the command line is not quiet"
         make -j"$JOBS" bzImage
     )
     # collect the monolithic EFI-stub kernel
