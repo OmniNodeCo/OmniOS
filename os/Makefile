@@ -25,7 +25,8 @@ OUTDIR    := $(ROOT)/build/install/os/bin
 
 BIN       := omnios-desktop ominit omnios-term omnios-files omnios-calc \
              omnios-edit omnios-sysinfo omnios-about omnios-store \
-             omnios-clock omnios-snake omnios-settings
+             omnios-clock omnios-snake omnios-settings omnios-taskmgr \
+             omnios-calendar omnios-mines omnios-2048 omnios-tictactoe
 
 # --- object lists -----------------------------------------------------
 LIB_OBJ := lib/raster.o lib/canvas.o lib/osfb.o lib/input.o lib/devinput.o
@@ -92,6 +93,26 @@ $(OUTDIR)/omnios-settings: apps/settings.o gui/settings.o gui/account.o \
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+$(OUTDIR)/omnios-taskmgr: apps/taskmgr.o gui/client.o gui/protocol.o
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(OUTDIR)/omnios-calendar: apps/calendar.o gui/client.o gui/protocol.o
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(OUTDIR)/omnios-mines: apps/mines.o gui/client.o gui/protocol.o
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(OUTDIR)/omnios-2048: apps/game2048.o gui/client.o gui/protocol.o
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(OUTDIR)/omnios-tictactoe: apps/tictactoe.o gui/client.o gui/protocol.o
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
 # --- generic compile rules ----------------------------------------------
 %.o: %.c
 	$(CC) $(CFLAGS) -c -o $@ $<
@@ -115,7 +136,8 @@ apps/app.o: apps/app.h gui/wm.h
 apps/terminal.o: apps/vt.h gui/client.h gui/wm.h
 apps/vt.o: apps/vt.h
 apps/store.o: gui/catalog.h gui/client.h gui/wm.h
-apps/clock.o apps/snake.o: gui/client.h gui/wm.h
+apps/clock.o apps/snake.o apps/taskmgr.o apps/calendar.o apps/mines.o \
+apps/game2048.o apps/tictactoe.o: gui/client.h gui/wm.h
 apps/files.o: apps/app.h
 apps/calc.o: apps/app.h
 apps/edit.o: gui/client.h gui/wm.h

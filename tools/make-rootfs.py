@@ -227,7 +227,8 @@ def main():
     for b in ("ominit", "omnios-desktop", "omnios-term", "omnios-files",
               "omnios-calc", "omnios-edit", "omnios-sysinfo", "omnios-about",
               "omnios-store", "omnios-clock", "omnios-snake",
-              "omnios-settings"):
+              "omnios-settings", "omnios-taskmgr", "omnios-calendar",
+              "omnios-mines", "omnios-2048", "omnios-tictactoe"):
         s = os.path.join(OS_BIN, b)
         if os.path.exists(s):
             dst = os.path.join(OUT, "usr", "bin", b)
