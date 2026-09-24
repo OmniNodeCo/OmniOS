@@ -14,12 +14,22 @@ permissions:
 
 env:
   OMNIOS_JOBS: 4
+  # Compiler cache. Every gcc/cc call in the build (Linux kernel, musl,
+  # BusyBox, Nano-X, the OmniOS core) goes through ccache because
+  # /usr/lib/ccache is put first on PATH; the cache directory itself is
+  # carried between runs by the "compiler cache" steps below.
+  CCACHE_DIR: ${{ github.workspace }}/.ccache
+  CCACHE_BASEDIR: ${{ github.workspace }}
+  CCACHE_MAXSIZE: 2G
 
 jobs:
   build:
     name: Build (from source)
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Check out repository
@@ -31,19 +41,91 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential bc cpio gzip perl python3 python3-pip \
             flex bison mtools xorriso isolinux xz-utils zstd git \
-            ca-certificates libc6-dev linux-libc-dev
+            ca-certificates libc6-dev linux-libc-dev ccache
           python3 -m pip install --user --break-system-packages pycdlib
+          # ccache's gcc/cc wrappers first on PATH for all later steps
+          test -x /usr/lib/ccache/gcc
+          echo /usr/lib/ccache >> "$GITHUB_PATH"
 
       - name: Fetch upstream sources
         run: scripts/build.sh fetch
 
-      - name: Build toolchain + userspace + OS core + rootfs
+      # ------------------------------------------------------------------
+      # Cache keys.
+      #  * userspace: the prebuilt bc / musl sysroot / BusyBox / Nano-X are
+      #    reused only if nothing that shapes them changed: this workflow,
+      #    build.sh, their configs, the kernel patch (UAPI headers), the
+      #    exact upstream commits just fetched, the compiler, the runner
+      #    image and the workspace path (musl-gcc embeds absolute paths).
+      #  * ccache: one entry per run, restored from the newest earlier one;
+      #    ccache itself validates every object by content.
+      # ------------------------------------------------------------------
+      - name: Compute cache keys
+        id: keys
         run: |
-          scripts/build.sh toolchain
-          scripts/build.sh musl
-          scripts/build.sh userspace
-          scripts/build.sh os
-          scripts/build.sh rootfs
+          image="${ImageOS:-unknown}"
+          us=$( {
+                  cat .github/workflows/build.yml scripts/build.sh \
+                      tools/config/busybox.config \
+                      tools/config/microwindows.config patches/*
+                  for p in bc musl busybox microwindows linux; do
+                      echo "$p $(git -C "src/$p" rev-parse HEAD)"
+                  done
+                  gcc -dumpfullversion
+                  echo "$GITHUB_WORKSPACE"
+                } | sha256sum | cut -c1-20 )
+          echo "image=$image" >> "$GITHUB_OUTPUT"
+          echo "userspace=omnios-userspace-v1-$image-$us" >> "$GITHUB_OUTPUT"
+
+      - name: Restore compiler cache
+        id: ccache-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: omnios-ccache-v1-${{ steps.keys.outputs.image }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            omnios-ccache-v1-${{ steps.keys.outputs.image }}-
+
+      - name: Restore prebuilt userspace (bc, musl, BusyBox, Nano-X)
+        id: userspace-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            build/sysroot
+            build/busybox.config.resolved
+            src/bc/bin
+            src/musl/lib/libc.a
+            src/busybox/busybox
+            src/microwindows/src/bin
+          key: ${{ steps.keys.outputs.userspace }}
+
+      - name: Prepare compiler cache
+        run: |
+          ccache --version | head -n 1
+          ccache --zero-stats
+          ccache --show-config | grep -E ' (cache_dir|max_size|base_dir) = '
+          if [ "$(command -v gcc)" != /usr/lib/ccache/gcc ]; then
+              echo "::warning::gcc resolves to $(command -v gcc), not ccache"
+          fi
+
+      - name: Build toolchain + userspace + OS core
+        run: scripts/build.sh userspace
+
+      - name: Save prebuilt userspace
+        if: steps.userspace-restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            build/sysroot
+            build/busybox.config.resolved
+            src/bc/bin
+            src/musl/lib/libc.a
+            src/busybox/busybox
+            src/microwindows/src/bin
+          key: ${{ steps.keys.outputs.userspace }}
+
+      - name: Assemble the root filesystem
+        run: scripts/build.sh rootfs
 
       - name: Build the kernel (with embedded initramfs)
         run: scripts/build.sh kernel
@@ -64,3 +146,54 @@ jobs:
 
       - name: Show ISO checksum
         run: cat build/out/*.iso.sha256 || true
+
+      # Stats + decide whether this run added enough to be worth uploading.
+      # Runs that only touched a few OmniOS source files skip the save and
+      # the next run restores the same (still valid) cache.
+      - name: Compiler cache statistics
+        id: ccache-stats
+        if: ${{ !cancelled() }}
+        env:
+          RESTORED: ${{ steps.ccache-restore.outputs.cache-matched-key }}
+          USERSPACE_HIT: ${{ steps.userspace-restore.outputs.cache-hit }}
+        run: |
+          ccache --show-stats --verbose
+          stats=$(ccache --print-stats)
+          counter() { printf '%s\n' "$stats" | awk -F'\t' -v k="$1" '$1 == k { print $2 }'; }
+          direct=$(counter direct_cache_hit)
+          pre=$(counter preprocessed_cache_hit)
+          miss=$(counter cache_miss)
+          direct=${direct:-0}; pre=${pre:-0}; miss=${miss:-0}
+          total=$(( direct + pre + miss ))
+          rate=0
+          if [ "$total" -gt 0 ]; then rate=$(( (direct + pre) * 100 / total )); fi
+          # new entries = misses + preprocessor-mode hits (they add direct-mode manifests)
+          if [ -z "$RESTORED" ] || [ $(( pre + miss )) -ge 50 ]; then
+              save=true
+              # drop entries no build has used for a week so the cache stays lean
+              ccache --evict-older-than 7d || true
+          else
+              save=false
+          fi
+          echo "save=$save" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Build caches"
+            echo ""
+            echo "| cache | result |"
+            echo "|---|---|"
+            echo "| compiler (ccache) | restored from \`${RESTORED:-nothing (cold start)}\` |"
+            echo "| ccache hit rate | ${rate}% (${direct} direct + ${pre} preprocessed hits, ${miss} misses) |"
+            echo "| ccache saved this run | ${save} |"
+            if [ "$USERSPACE_HIT" = true ]; then
+              echo "| prebuilt userspace | hit (bc, musl, BusyBox, Nano-X not rebuilt) |"
+            else
+              echo "| prebuilt userspace | miss (rebuilt and saved) |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save compiler cache
+        if: ${{ !cancelled() && steps.ccache-stats.outputs.save == 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: omnios-ccache-v1-${{ steps.keys.outputs.image }}-${{ github.run_id }}-${{ github.run_attempt }}
