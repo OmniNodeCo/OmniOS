@@ -120,6 +120,13 @@ struct omni_devs {
     int ev_fd[8];              /* /dev/input/event0..7                    */
     int ev_n;
     int tty_fd;                /* /dev/tty raw-mode keyboard fallback     */
+    /* set by omni_devs_open(): does an evdev device already carry the
+     * pointer (EV_REL) / keyboard (EV_KEY+KEY_A)?  When yes, the legacy
+     * /dev/input/mice and /dev/tty sources are NOT opened, because
+     * mousedev and the VT consume the very same input devices evdev
+     * exposes — reading both would double every motion and key press.  */
+    int ev_has_rel;
+    int ev_has_kbd;
 };
 
 void omni_devs_open(struct omni_devs *d);

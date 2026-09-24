@@ -3,11 +3,17 @@
  *
  * Device input backends:
  *   /dev/input/event*    evdev protocol (preferred: keyboard + mouse)
- *   /dev/input/mice      PS/2 "ImPS/2" auxiliary 3-byte protocol
- *   /dev/tty             raw-mode scancodes (last resort keyboard)
+ *   /dev/input/mice      PS/2 "ImPS/2" auxiliary 3-byte protocol (fallback)
+ *   /dev/tty             raw-mode AT scancodes (last resort keyboard)
  *
  * Events are decoded into struct omni_input and pushed onto the shared
  * queue from input.c. The desktop polls these fds with poll(2).
+ *
+ * Single-source rule: the mousedev driver and the in-kernel VT are
+ * *additional* consumers of the same input devices that evdev exposes,
+ * so at most ONE of {evdev, mice} may be read for the pointer and at
+ * most ONE of {evdev, tty} for the keyboard — otherwise every motion or
+ * key press would be applied twice.
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
@@ -21,6 +27,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <termios.h>
+#include <sys/ioctl.h>
 #include <linux/input.h>
 
 #include "omni.h"
@@ -130,12 +137,38 @@ static int read_mice(struct omni_devs *d, int fd)
 /* tty raw scancodes (fallback)                                       */
 /* ------------------------------------------------------------------ */
 
+/* The /dev/tty fallback delivers raw AT set-1 scancodes, while evdev
+ * delivers Linux input event codes (linux/input.h).  The main block of
+ * the keyboard happens to use identical numbers in both schemes, so
+ * only the stragglers need translating before the shared lookup table. */
+static int at_to_linux_code(unsigned sc)
+{
+    switch (sc) {
+    case 0x3d: return KEY_SPACE;      /* 61  space                       */
+    case 0x69: return KEY_KP1;        /* 105 numpad 1                    */
+    case 0x72: return KEY_KP2;        /* 114 numpad 2                    */
+    case 0x7b: return KEY_KP3;        /* 123 numpad 3                    */
+    case 0x70: return KEY_KP4;        /* 112 numpad 4                    */
+    case 0x71: return KEY_KP5;        /* 113 numpad 5                    */
+    case 0x7a: return KEY_KP6;        /* 122 numpad 6                    */
+    case 0x75: return KEY_KP7;        /* 117 numpad 7                    */
+    case 0x76: return KEY_KP8;        /* 118 numpad 8                    */
+    case 0x77: return KEY_KP9;        /* 119 numpad 9                    */
+    case 0x6b: return KEY_KP0;        /* 107 numpad 0                    */
+    case 0x6e: return KEY_KPDOT;      /* 110 numpad .                    */
+    case 0x54: return KEY_KPPLUS;     /* 84  numpad +                    */
+    case 0x52: return KEY_KPMINUS;    /* 82  numpad -                    */
+    default:   return (int)sc;
+    }
+}
+
 static int read_tty(struct omni_devs *d, int fd)
 {
     unsigned char raw;
     ssize_t n;
     int shift = 0;
 
+    (void)d;
     for (;;) {
         n = read(fd, &raw, 1);
         if (n < 0) {
@@ -146,14 +179,18 @@ static int read_tty(struct omni_devs *d, int fd)
         if (n < 1)
             return 0;
 
-        if (raw == 0xe0) {      /* extended prefix: skip next */
-            char ext;
-            read(fd, &ext, 1);
+        if (raw == 0xe0) {      /* extended prefix */
+            unsigned char ext;
+            if (read(fd, &ext, 1) != 1)
+                continue;
+            if (ext == 0x53)    /* extended backspace (e0 53) */
+                omni_input_push_key(KEY_BACKSPACE, 1, shift, 0x08);
             continue;
         }
+        if (raw == 0xaa || raw == 0xb6) { shift = 0; continue; }
         if (raw & 0x80) {       /* release */
-            char ch = omni_key_char(raw & 0x7f, shift);
-            omni_input_push_key(raw & 0x7f, 0, shift, ch);
+            int code = at_to_linux_code(raw & 0x7f);
+            omni_input_push_key(code, 0, shift, 0);
             continue;
         }
         if (raw == 0x2a || raw == 0x36) { /* shift make */
@@ -161,10 +198,10 @@ static int read_tty(struct omni_devs *d, int fd)
             continue;
         }
         {
-            char ch = omni_key_char(raw, shift);
-            omni_input_push_key(raw, 1, shift, ch);
+            int code = at_to_linux_code(raw);
+            char ch = omni_key_char(code, shift);
+            omni_input_push_key(code, 1, shift, ch);
         }
-        (void)d;
     }
 }
 
@@ -172,10 +209,85 @@ static int read_tty(struct omni_devs *d, int fd)
 /* device set                                                         */
 /* ------------------------------------------------------------------ */
 
-void omni_devs_open(struct omni_devs *d)
+/* True if one of the already-opened evdev fds carries a capability
+ * bit: type=EV_REL, bit 0 is REL_X (a pointer); type=EV_KEY, bit 30
+ * is KEY_A — on every real keyboard, on no mouse (mouse buttons ride
+ * EV_KEY too, so "has EV_KEY" alone is not a keyboard test). */
+static int evdev_has_bit(struct omni_devs *d, int type, int bit)
+{
+    int i;
+    unsigned long bits[1];
+
+    for (i = 0; i < d->ev_n; i++) {
+        memset(bits, 0, sizeof(bits));
+        if (ioctl(d->ev_fd[i], EVIOCGBIT(type, sizeof(bits)), bits) > 0 &&
+            (bits[0] & (1UL << bit)))
+            return 1;
+    }
+    return 0;
+}
+
+/* One pass: (re)open /dev/input/event0..7, then decide which legacy
+ * sources are safe to open:
+ *   /dev/input/mice  only if no evdev device carries the pointer,
+ *   /dev/tty         only if no evdev device carries the keyboard.
+ * A legacy source opened on an earlier pass is closed again as soon
+ * as its evdev equivalent appears (USB mice can enumerate after boot). */
+static void omni_devs_open_once(struct omni_devs *d)
 {
     int i;
     char path[64];
+
+    for (i = 0; i < 8; i++) {
+        if (d->ev_fd[i] >= 0)
+            close(d->ev_fd[i]);
+        d->ev_fd[i] = -1;
+    }
+    d->ev_n = 0;
+
+    for (i = 0; i < 8; i++) {
+        snprintf(path, sizeof(path), "/dev/input/event%d", i);
+        int fd = open(path, O_RDONLY | O_NONBLOCK);
+        if (fd >= 0)
+            d->ev_fd[d->ev_n++] = fd;
+    }
+
+    d->ev_has_rel = evdev_has_bit(d, EV_REL, 0);
+    d->ev_has_kbd = evdev_has_bit(d, EV_KEY, KEY_A);
+
+    if (d->ev_has_rel) {
+        if (d->mice_fd >= 0) {
+            close(d->mice_fd);
+            d->mice_fd = -1;
+        }
+    } else if (d->mice_fd < 0) {
+        d->mice_fd = open("/dev/input/mice", O_RDONLY | O_NONBLOCK);
+        if (d->mice_fd < 0)
+            d->mice_fd = -1;
+    }
+
+    if (d->ev_has_kbd) {
+        if (d->tty_fd >= 0) {
+            close(d->tty_fd);
+            d->tty_fd = -1;
+        }
+    } else if (d->tty_fd < 0) {
+        d->tty_fd = open("/dev/tty", O_RDONLY | O_NONBLOCK);
+        if (d->tty_fd >= 0) {
+            struct termios t;
+            if (tcgetattr(d->tty_fd, &t) == 0) {
+                cfmakeraw(&t);
+                tcsetattr(d->tty_fd, TCSANOW, &t);
+            }
+        } else {
+            d->tty_fd = -1;
+        }
+    }
+}
+
+void omni_devs_open(struct omni_devs *d)
+{
+    int i, try;
 
     memset(d, 0, sizeof(*d));
     d->mice_fd = -1;
@@ -183,26 +295,13 @@ void omni_devs_open(struct omni_devs *d)
     for (i = 0; i < 8; i++)
         d->ev_fd[i] = -1;
 
-    /* evdev keyboard/mouse */
-    for (i = 0; i < 8; i++) {
-        snprintf(path, sizeof(path), "/dev/input/event%d", i);
-        int fd = open(path, O_RDONLY | O_NONBLOCK);
-        if (fd >= 0) {
-            d->ev_fd[d->ev_n++] = fd;
-        }
-    }
-
-    d->mice_fd = open("/dev/input/mice", O_RDONLY | O_NONBLOCK);
-    if (d->mice_fd < 0)
-        d->mice_fd = -1;
-
-    d->tty_fd = open("/dev/tty", O_RDONLY | O_NONBLOCK);
-    if (d->tty_fd >= 0) {
-        struct termios t;
-        if (tcgetattr(d->tty_fd, &t) == 0) {
-            cfmakeraw(&t);
-            tcsetattr(d->tty_fd, TCSANOW, &t);
-        }
+    for (try = 0; try < 20; try++) {
+        omni_devs_open_once(d);
+        if ((d->ev_has_rel || d->mice_fd >= 0) &&
+            (d->ev_has_kbd || d->tty_fd >= 0))
+            break;
+        if (try < 19)
+            usleep(250 * 1000);     /* wait out USB enumeration at boot */
     }
 }
 

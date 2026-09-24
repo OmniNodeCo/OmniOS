@@ -5,9 +5,13 @@
  * /dev/input/mice (mouse relative motion + buttons) and /dev/tty
  * (TTYKBD raw scancodes), plus tty helpers.
  *
- * The GUI prefers /dev/input/mice for the mouse and the Nano-X-independent
- * tty path for the keyboard; the keyboard decode follows USB-HID / AT
- * scancode set 1 as exposed by the Linux VT in raw mode.
+ * The GUI reads the pointer and keyboard from evdev
+ * (/dev/input/event*) whenever the kernel exposes them, and falls
+ * back to /dev/input/mice + raw /dev/tty only when evdev has no such
+ * device (see os/lib/devinput.c).  The table below is indexed by
+ * Linux input event codes (include/uapi/linux/input.h — the codes
+ * evdev delivers); the AT set-1 fallback path translates its
+ * scancodes onto these before lookup.
  */
 #include <fcntl.h>
 #include <stdint.h>
@@ -20,7 +24,7 @@
 #include "omni.h"
 
 /* ------------------------------------------------------------------ */
-/* Keyboard table: scancodes 0..127 (AT set 1 / USB HID-offset) mapping. */
+/* Keyboard table: Linux input event codes (KEY_*, uapi/linux/input.h). */
 /* ------------------------------------------------------------------ */
 
 static const struct omni_key kbd_scan[128] = {
