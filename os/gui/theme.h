@@ -16,7 +16,9 @@
 #include "../lib/omni.h"
 
 /* ---- palette ------------------------------------------------------- */
-#define TH_ACCENT        0x3b82f6   /* blue                              */
+/* accent colour: set from the user's settings (Settings > Personalization) */
+extern uint32_t th_accent;
+#define TH_ACCENT        th_accent  /* default blue 0x3b82f6              */
 #define TH_ACCENT_2      0x8b5cf6   /* violet                            */
 #define TH_TITLE_ACTIVE  0xf7f8fb   /* window title bars                 */
 #define TH_TITLE_IDLE    0xe6e9ef
@@ -85,6 +87,10 @@ int  th_text2x_width(const char *s);
 /* ---- artwork ---------------------------------------------------------- */
 /* the modern wallpaper, rendered once into w x h pixels */
 void th_wallpaper(uint32_t *px, int w, int h);
+/* the same composition in another palette: TH_WALL_* (Settings picks one) */
+enum { TH_WALL_BLOOM, TH_WALL_AURORA, TH_WALL_SUNSET, TH_WALL_OCEAN,
+       TH_WALL_ROSE, TH_WALL_GRAPHITE, TH_WALL_COUNT };
+void th_wallpaper_style(uint32_t *px, int w, int h, int style);
 /* app icon: rounded square with a gentle gradient and the initial */
 void th_icon(struct raster *r, int x, int y, int size, uint32_t rgb, char letter);
 /* the classic lettered gradient tile (th_icon falls back to it) */

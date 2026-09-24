@@ -21,6 +21,8 @@ const struct omni_app_info omni_catalog[] = {
       "Command line with a real shell (ash).",                 1, 1, 0x334155, '>' },
     { "files",    "File Manager", "/usr/bin/omnios-files",   "System",
       "Browse the files on your system.",                      1, 1, 0xf59e0b, 'F' },
+    { "settings", "Settings",     "/usr/bin/omnios-settings", "System",
+      "Personalize OmniOS, manage your account and updates.",  1, 1, 0x64748b, 'G' },
     { "edit",     "Text Editor",  "/usr/bin/omnios-edit",    "Productivity",
       "Write and edit plain text.",                            0, 1, 0x0ea5e9, 'E' },
     { "calc",     "Calculator",   "/usr/bin/omnios-calc",    "Utilities",

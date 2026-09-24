@@ -25,6 +25,8 @@
 #define _GNU_SOURCE
 #endif
 #include <poll.h>
+#include <pwd.h>
+#include <sys/stat.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -36,6 +38,8 @@
 #include "catalog.h"
 #include "shell.h"
 #include "theme.h"
+#include "settings.h"
+#include "account.h"
 #include "wm.h"
 
 /* ------------------------------------------------------------------ */
@@ -51,6 +55,7 @@
 #define MENU_W       340
 #define MENU_HEAD_H  76
 #define MENU_ROW_H   36
+#define MENU_ROW_MIN 26          /* rows shrink to this before apps drop */
 #define MENU_FOOT_H  56
 #define MENU_RAD     10
 #define PILL_W       96         /* Restart / Shut down buttons           */
@@ -79,6 +84,11 @@ static uint32_t        *g_front;    /* what g_dev shows, minus the cursor  */
 static uint32_t        *g_wall;     /* the wallpaper, rendered once        */
 static uint32_t        *g_rowbuf;   /* one device row of scratch           */
 static uint32_t        *g_barbg;    /* taskbar glass over bare wallpaper   */
+static struct omni_settings g_set;   /* the user's settings (settings.c)    */
+static int              g_set_wall = -1;     /* wallpaper style rendered    */
+static time_t           g_set_mtime;         /* settings file last seen     */
+static off_t            g_set_size = -1;
+static char             g_user[40] = "root"; /* account shown in Start      */
 static int g_full_present;          /* next present rewrites every pixel   */
 static int g_px, g_py;              /* pointer (mouse) position            */
 static int g_menu_open;             /* Start menu visible                  */
@@ -459,8 +469,11 @@ static void draw_taskbar(void)
 
         localtime_r(&t, &tmv);
         hr = tmv.tm_hour % 12;
-        snprintf(tbuf, sizeof(tbuf), "%d:%02d %s", hr ? hr : 12, tmv.tm_min,
-                 tmv.tm_hour < 12 ? "AM" : "PM");
+        if (g_set.clock24)
+            snprintf(tbuf, sizeof(tbuf), "%02d:%02d", tmv.tm_hour, tmv.tm_min);
+        else
+            snprintf(tbuf, sizeof(tbuf), "%d:%02d %s", hr ? hr : 12, tmv.tm_min,
+                     tmv.tm_hour < 12 ? "AM" : "PM");
         snprintf(dbuf, sizeof(dbuf), "%d/%d/%d", tmv.tm_mon + 1, tmv.tm_mday,
                  tmv.tm_year + 1900);
         tw = (int)strlen(tbuf) * 8;
@@ -477,6 +490,7 @@ static void draw_taskbar(void)
 struct menu_geom {
     int x, y, w, h;
     int rows_y, nrows;          /* app rows (as many as fit)             */
+    int row_h;                  /* row pitch: shrinks so every app fits  */
     int foot_y;
     int restart_x, shutdown_x, pill_y;
 };
@@ -488,12 +502,18 @@ static struct menu_geom menu_geom(void)
     int fixed = MENU_HEAD_H + 16 + MENU_FOOT_H;
 
     g.nrows = g_menu_n;
-    if (fixed + g.nrows * MENU_ROW_H > avail)
-        g.nrows = (avail - fixed) / MENU_ROW_H;
+    g.row_h = MENU_ROW_H;
+    if (g.nrows > 0 && fixed + g.nrows * g.row_h > avail) {
+        g.row_h = (avail - fixed) / g.nrows;       /* small screen: tighter rows */
+        if (g.row_h < MENU_ROW_MIN)
+            g.row_h = MENU_ROW_MIN;
+        if (fixed + g.nrows * g.row_h > avail)
+            g.nrows = (avail - fixed) / g.row_h;
+    }
     if (g.nrows < 0)
         g.nrows = 0;
     g.w = MENU_W;
-    g.h = fixed + g.nrows * MENU_ROW_H;
+    g.h = fixed + g.nrows * g.row_h;
     g.x = 8;
     g.y = g_screen.h - TASKBAR_H - 8 - g.h;
     if (g.y < 0)
@@ -516,8 +536,8 @@ static int menu_hit(int x, int y)
     if (x < g.x || y < g.y || x >= g.x + g.w || y >= g.y + g.h)
         return 0;
     for (i = 0; i < g.nrows; i++) {
-        int ry = g.rows_y + i * MENU_ROW_H;
-        if (y >= ry && y < ry + MENU_ROW_H && x >= g.x + 8 && x < g.x + g.w - 8)
+        int ry = g.rows_y + i * g.row_h;
+        if (y >= ry && y < ry + g.row_h && x >= g.x + 8 && x < g.x + g.w - 8)
             return HV_ROW + i;
     }
     if (y >= g.pill_y && y < g.pill_y + PILL_H) {
@@ -564,25 +584,24 @@ static void draw_menu(void)
     /* apps: icon, name, category */
     for (i = 0; i < g.nrows; i++) {
         const struct omni_app_info *a = g_menu_app[i];
-        int ry = g.rows_y + i * MENU_ROW_H;
+        int ry = g.rows_y + i * g.row_h, mid = ry + g.row_h / 2;
 
         if (i == g_menu_sel)
-            th_round_rect(r, g.x + 8, ry + 1, g.w - 16, MENU_ROW_H - 2, 6,
+            th_round_rect(r, g.x + 8, ry + 1, g.w - 16, g.row_h - 2, 6,
                           0xffffff, 30);
-        th_icon(r, g.x + 18, ry + 6, 24, a ? a->color : TH_ACCENT,
+        th_icon(r, g.x + 18, mid - 12, 24, a ? a->color : TH_ACCENT,
                 a ? a->glyph : g_menu[i].label[0]);
-        th_text(r, g_menu[i].label, g.x + 54, ry + 14, TH_TEXT_LIGHT);
+        th_text(r, g_menu[i].label, g.x + 54, mid - 4, TH_TEXT_LIGHT);
         if (a)
             th_text(r, a->category,
-                    g.x + g.w - 20 - (int)strlen(a->category) * 8, ry + 14,
+                    g.x + g.w - 20 - (int)strlen(a->category) * 8, mid - 4,
                     TH_TEXT_DIM);
     }
 
     /* footer: the user, Restart, Shut down */
     th_fill_a(r, g.x + 16, g.foot_y, g.w - 32, 1, 0xffffff, 22);
-    th_round_rect(r, g.x + 16, g.foot_y + 15, 26, 26, 13, TH_ACCENT, 255);
-    th_text_bold(r, "R", g.x + 25, g.foot_y + 24, 0xffffff);
-    th_text(r, "root", g.x + 50, g.foot_y + 24, TH_TEXT_LIGHT);
+    th_icon(r, g.x + 16, g.foot_y + 15, 26, TH_ACCENT, 'u');
+    th_text(r, g_user, g.x + 50, g.foot_y + 24, TH_TEXT_LIGHT);
     draw_pill(r, g.restart_x, g.pill_y, "Restart", g_hover == HV_RESTART);
     draw_pill(r, g.shutdown_x, g.pill_y, "Shut down", g_hover == HV_SHUTDOWN);
 }
@@ -867,6 +886,48 @@ void omni_shell_open_initial_windows(void)
 /* setup + main loop                                                  */
 /* ------------------------------------------------------------------ */
 
+/* wallpaper in the chosen style + the taskbar glass pre-rendered over it */
+static void shell_backdrop(void)
+{
+    th_wallpaper_style(g_wall, g_dev.w, g_dev.h, g_set.wallpaper);
+    g_set_wall = g_set.wallpaper;
+    if (g_barbg && g_dev.h > TASKBAR_H) {
+        struct raster bar;
+        memcpy(g_barbg, g_wall + (size_t)(g_dev.h - TASKBAR_H) * (size_t)g_dev.w,
+               (size_t)g_dev.w * TASKBAR_H * sizeof(uint32_t));
+        raster_init(&bar, g_barbg, g_dev.w, TASKBAR_H, g_dev.w);
+        taskbar_glass(&bar, 0);
+    }
+}
+
+/* (re)load the settings file when it changed (or `force`) and apply it:
+ * accent, time zone (inherited by apps launched from now on), clock
+ * format, wallpaper. Returns 1 if anything was applied. */
+static int shell_apply_settings(int force)
+{
+    struct stat st;
+    int have = stat(omni_settings_path(), &st) == 0;
+
+    if (!force && have && st.st_mtime == g_set_mtime && st.st_size == g_set_size)
+        return 0;
+    if (!force && !have && g_set_size == -1)
+        return 0;
+    g_set_mtime = have ? st.st_mtime : 0;
+    g_set_size = have ? st.st_size : -1;
+    omni_settings_load(&g_set);
+    th_accent = omni_accents[g_set.accent % omni_accents_n].rgb;
+    omni_settings_apply_tz(&g_set);
+    if (g_wall && g_set.wallpaper != g_set_wall)
+        shell_backdrop();
+    return 1;
+}
+
+/* the account the desktop runs as, for the Start menu (full name if set) */
+static void read_user(void)
+{
+    snprintf(g_user, sizeof(g_user), "%s", omni_account_display());
+}
+
 /* Frame buffers, wallpaper, cursor and window manager for a display. */
 static int shell_display_init(struct raster dev)
 {
@@ -886,17 +947,12 @@ static int shell_display_init(struct raster dev)
         return -1;
     }
     raster_init(&g_screen, scene, dev.w, dev.h, dev.w);
-    th_wallpaper(g_wall, dev.w, dev.h);
     g_barbg = malloc((size_t)dev.w * TASKBAR_H * sizeof(uint32_t));
-    if (g_barbg && dev.h > TASKBAR_H) {
-        struct raster bar;
-        memcpy(g_barbg, g_wall + (size_t)(dev.h - TASKBAR_H) * (size_t)dev.w,
-               (size_t)dev.w * TASKBAR_H * sizeof(uint32_t));
-        raster_init(&bar, g_barbg, dev.w, TASKBAR_H, dev.w);
-        taskbar_glass(&bar, 0);
-    }
+    g_set_wall = -1;
+    shell_apply_settings(1);                   /* renders the backdrop */
     cursor_build();
     read_version();
+    read_user();
 
     omni_wm_init(&g_wm, &g_screen);
     g_wm.draw_background = shell_draw_background;
@@ -917,6 +973,7 @@ void omni_shell_run(void)
     int npoll;
     int nfds_dev, nfds;
     int clock_last = -1, banner_last = 0;
+    time_t settings_checked = 0;
     time_t last_rescan = 0;
 
     if (osfb_wait("/dev/fb0", 50, 200) < 0)
@@ -1056,6 +1113,11 @@ void omni_shell_run(void)
 
         if (update_hover())
             need = 1;
+        if (t != settings_checked) {             /* Settings app saved? */
+            settings_checked = t;
+            if (shell_apply_settings(0))
+                need = 1;
+        }
         localtime_r(&t, &tmv);
         if (tmv.tm_min != clock_last) {
             clock_last = tmv.tm_min;

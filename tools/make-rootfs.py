@@ -188,7 +188,7 @@ _MOTD = """\
 """.replace("${VERSION}", VERSION)
 
 _PASSWD = """\
-root:x:0:0:root:/root:/bin/sh
+root:x:0:0:Administrator:/root:/bin/sh
 omnios:x:1000:1000:OmniOS user:/home/omnios:/bin/sh
 """
 
@@ -226,7 +226,8 @@ def main():
     # omnios-*          bundled desktop apps
     for b in ("ominit", "omnios-desktop", "omnios-term", "omnios-files",
               "omnios-calc", "omnios-edit", "omnios-sysinfo", "omnios-about",
-              "omnios-store", "omnios-clock", "omnios-snake"):
+              "omnios-store", "omnios-clock", "omnios-snake",
+              "omnios-settings"):
         s = os.path.join(OS_BIN, b)
         if os.path.exists(s):
             dst = os.path.join(OUT, "usr", "bin", b)
@@ -278,6 +279,9 @@ def main():
     w("etc/init.d/rcS", _RCS, 0o755)
     w("etc/profile", _PROFILE)
     w("etc/passwd", _PASSWD)
+    # no password until the user sets one (Settings > Accounts)
+    w("etc/shadow", "root::20000:0:99999:7:::\n")
+    os.chmod(os.path.join(OUT, "etc", "shadow"), 0o600)
     w("etc/group", _GROUP)
     w("etc/motd", _MOTD)
     w("etc/issue", _MOTD)

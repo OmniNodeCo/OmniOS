@@ -13,6 +13,8 @@
 #include "theme.h"
 #include "icons.h"
 
+uint32_t th_accent = 0x3b82f6;
+
 static inline uint32_t *px_at(struct raster *r, int x, int y)
 {
     return r->bits + (size_t)y * (size_t)r->stride + (size_t)x;
@@ -497,8 +499,24 @@ static inline uint32_t hash2(int x, int y)
     return h ^ (h >> 16);
 }
 
+/* colour mixes for the wallpaper styles: out = M * (r, g, b) */
+static const float g_wall_mix[TH_WALL_COUNT][9] = {
+    { 1.00f, 0.00f, 0.00f,  0.00f, 1.00f, 0.00f,  0.00f, 0.00f, 1.00f },  /* Bloom    */
+    { 0.20f, 0.10f, 0.05f,  0.20f, 0.60f, 0.65f,  0.25f, 0.20f, 0.55f },  /* Aurora   */
+    { 0.55f, 0.10f, 0.75f,  0.25f, 0.55f, 0.25f,  0.45f, 0.10f, 0.25f },  /* Sunset   */
+    { 0.15f, 0.10f, 0.05f,  0.25f, 0.45f, 0.45f,  0.55f, 0.30f, 0.95f },  /* Ocean    */
+    { 0.60f, 0.10f, 0.70f,  0.25f, 0.50f, 0.10f,  0.55f, 0.25f, 0.45f },  /* Rose     */
+    { 0.30f, 0.45f, 0.40f,  0.30f, 0.45f, 0.40f,  0.32f, 0.47f, 0.46f },  /* Graphite */
+};
+
 void th_wallpaper(uint32_t *px, int w, int h)
 {
+    th_wallpaper_style(px, w, h, TH_WALL_BLOOM);
+}
+
+void th_wallpaper_style(uint32_t *px, int w, int h, int style)
+{
+    const float *mix = g_wall_mix[(style >= 0 && style < TH_WALL_COUNT) ? style : 0];
     float aspect = (float)w / (float)(h > 0 ? h : 1);
     float *gx = malloc(sizeof(float) * (size_t)(NGLOW * w));
     float *gy = malloc(sizeof(float) * (size_t)(NGLOW * h));
@@ -568,6 +586,12 @@ void th_wallpaper(uint32_t *px, int w, int h)
                 cr = 1.0f - (1.0f - cr) * (1.0f - o[2] * a);
                 cg = 1.0f - (1.0f - cg) * (1.0f - o[3] * a);
                 cb = 1.0f - (1.0f - cb) * (1.0f - o[4] * a);
+            }
+            if (style > 0) {                    /* re-colour for the style */
+                float r0 = cr, g0 = cg, b0 = cb;
+                cr = mix[0] * r0 + mix[1] * g0 + mix[2] * b0;
+                cg = mix[3] * r0 + mix[4] * g0 + mix[5] * b0;
+                cb = mix[6] * r0 + mix[7] * g0 + mix[8] * b0;
             }
             vig = 1.0f - 0.55f * (du * du + dv * dv);
             n = ((float)(hash2(x, y) & 0xff) / 255.0f - 0.5f) * 1.5f;  /* dither */
