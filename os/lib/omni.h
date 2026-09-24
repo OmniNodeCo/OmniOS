@@ -206,10 +206,6 @@ void     raster_scroll(struct raster *r, int dy, uint32_t fill);
 void     raster_gradient_v(struct raster *r, int x, int y, int w, int h,
                            uint32_t top, uint32_t bottom);
 
-/* Horizontally mirror the raster in place (pixels within each row are
- * swapped end-for-end).  Works for any byte-oriented pixel format. */
-void     raster_mirror_h(struct raster *r);
-
 /* ------------------------------------------------------------------ */
 /* Text canvas (uses the embedded 8x8 public-domain font)             */
 /* ------------------------------------------------------------------ */

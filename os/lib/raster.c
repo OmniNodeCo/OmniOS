@@ -411,34 +411,6 @@ void raster_blit(struct raster *dst, const struct raster *src, int dx, int dy)
     raster_blit_clip(dst, src, dx, dy, 0, 0, src->w, src->h);
 }
 
-void raster_mirror_h(struct raster *r)
-{
-    const struct omni_pixfmt *pf = &r->fmt;
-    int bytes = (pf && pf->bytes > 0) ? pf->bytes : 4;
-    size_t pitch = (size_t)r->stride * (size_t)bytes;
-    uint8_t *rows = (uint8_t *)r->bits;
-    int y;
-
-    for (y = 0; y < r->h; y++) {
-        uint8_t *row = rows + (size_t)y * pitch;
-        size_t wbytes = (size_t)r->w * (size_t)bytes;
-        size_t a;
-        for (a = 0; a + (size_t)bytes <= wbytes; a += (size_t)bytes) {
-            size_t b = wbytes - a - (size_t)bytes;
-            if (a >= b)
-                break;
-            {   /* swap the two bytes pixels */
-                int i;
-                for (i = 0; i < bytes; i++) {
-                    uint8_t t = row[a + (size_t)i];
-                    row[a + (size_t)i] = row[b + (size_t)i];
-                    row[b + (size_t)i] = t;
-                }
-            }
-        }
-    }
-}
-
 void raster_blend(struct raster *dst, const struct raster *src, int dx, int dy)
 {
     int sy, sx;

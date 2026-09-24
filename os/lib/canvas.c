@@ -87,7 +87,11 @@ void canvas_draw_char(struct canvas *c, uint32_t ch, int x, int y,
     for (row = 0; row < 8; row++) {
         unsigned glyph = (unsigned)font8x8_basic[ch][row];
         for (px = 0; px < 8; px++) {
-            uint32_t color = (glyph & (0x80 >> px)) ? fg : bg;
+            /* font8x8 encodes each row least-significant-bit first
+             * (the LSB is the leftmost pixel), per the upstream README:
+             * "the least significant bit of each byte corresponds to the
+             * first pixel in a row" — so test bit `px`, not `7 - px`. */
+            uint32_t color = (glyph & (1u << px)) ? fg : bg;
             raster_px(&c->r, x + px, y + row, color);
         }
     }

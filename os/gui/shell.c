@@ -57,32 +57,6 @@ static const int g_menu_n = (int)(sizeof(g_menu) / sizeof(g_menu[0]));
 static const int TASKBAR_H = 30;
 
 /* ------------------------------------------------------------------ */
-/* horizontal flip control                                            */
-/* ------------------------------------------------------------------ */
-
-/* 1 = mirror the finished frame before the host scans it out.  Some
- * virtual display paths present the framebuffer right-to-left, which makes
- * left-to-right text look reversed AND mirror every glyph at once.  Default
- * ON; boot with `omnios.flip=0` on the kernel command line to disable. */
-static int g_flip = 1;
-
-static int shell_flip_enabled(void)
-{
-    static int decided = 0;
-    if (!decided) {
-        FILE *f = fopen("/proc/cmdline", "r");
-        char buf[512] = { 0 };
-        decided = 1;
-        if (f) {
-            if (fgets(buf, sizeof(buf), f) && strstr(buf, "omnios.flip=0"))
-                g_flip = 0;
-            fclose(f);
-        }
-    }
-    return g_flip;
-}
-
-/* ------------------------------------------------------------------ */
 /* mouse cursor                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -132,7 +106,7 @@ static void cursor_draw(void)
 }
 
 /* ------------------------------------------------------------------ */
-/* frame finish (chrome on top + device presentation)                */
+/* frame finish (chrome on top)                                       */
 /* ------------------------------------------------------------------ */
 
 /* forward declarations (definitions live further down) */
@@ -140,18 +114,13 @@ static void draw_taskbar(struct omni_wm *wm, struct raster *r);
 static void draw_menu(struct raster *r, int x, int y, int w, int n);
 
 /* Called by omni_wm_paint() after the wallpaper and windows are in place:
- * draw the always-on-top taskbar/start-menu and the mouse cursor, then
- * horizontally mirror the finished frame.  The mirror compensates for
- * hosts whose scanout runs right-to-left (symptoms: text left-to-right
- * order reversed AND every glyph mirrored at once). */
+ * draw the always-on-top taskbar/start-menu and the mouse cursor. */
 static void shell_finish(struct omni_wm *wm)
 {
     draw_taskbar(wm, &wm->screen);
     if (g_menu_open)
         draw_menu(&wm->screen, g_mx, g_my, 200, g_menu_n);
     cursor_draw();
-    if (shell_flip_enabled())
-        raster_mirror_h(&wm->screen);
 }
 
 /* ------------------------------------------------------------------ */
@@ -168,15 +137,8 @@ static void omni_shell_warp(int dx, int dy)
     if (dy > 63)   dy -= 128;
     if (dy < -64)  dy += 128;
 
-    /* The finished frame is horizontally mirrored before scanout (the
-     * host presents the buffer right-to-left), so horizontal mouse motion
-     * must be inverted for the visible cursor to track the host pointer.
-     * Vertical motion is unaffected by a horizontal mirror. */
-    if (shell_flip_enabled())
-        dx = -dx;
-
-    /* Curves are applied after 9-bit unfolding, so anything beyond one
-     * byte per event cannot happen with sane devices. */
+    /* safety clamp: beyond one byte per event cannot come from sane
+     * devices, and it stops a bogus device from teleporting the cursor. */
     dx = OMNI_WARP_CLAMP(dx, -255, 255);
     dy = OMNI_WARP_CLAMP(dy, -255, 255);
 
@@ -191,7 +153,6 @@ static void omni_shell_warp(int dx, int dy)
         if (nx != g_px) g_px = nx;
         if (ny != g_py) g_py = ny;
     }
-
 }
 
 /* ------------------------------------------------------------------ */
@@ -494,7 +455,7 @@ void omni_shell_run(void)
     g_px = g_screen.w / 2;
     g_py = g_screen.h / 2;
 
-    /* first paint (wallpaper + welcome window + chrome + mirror) */
+    /* first paint (wallpaper + welcome window + chrome + cursor) */
     omni_wm_paint(&g_wm);
 
     for (;;) {
@@ -558,7 +519,7 @@ void omni_shell_run(void)
 
         if (redraw)
             omni_wm_paint(&g_wm);            /* wallpaper + windows +
-                                                chrome + mirror (hook) */
+                                                chrome + cursor (hook) */
     }
 
     omni_devs_close(&devs);
