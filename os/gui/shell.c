@@ -37,6 +37,9 @@ static struct raster    g_screen;
 static int g_px, g_py;              /* pointer (mouse) position           */
 static int g_mx, g_my;              /* start-menu top-left origin         */
 static int g_menu_open;             /* start menu visible                 */
+static int g_input_ok_ptr;          /* a pointer source was found         */
+static int g_input_ok_kbd;          /* a keyboard source was found        */
+static time_t g_shell_t0;           /* desktop start (for the banner)     */
 
 /* scratch client-rect for the mouse-cursor sprite (rows padded by 1 px)  */
 static uint32_t g_cursor_scratch[OMNI_WM_CURSOR_W * OMNI_WM_CURSOR_H
@@ -120,6 +123,20 @@ static void shell_finish(struct omni_wm *wm)
     draw_taskbar(wm, &wm->screen);
     if (g_menu_open)
         draw_menu(&wm->screen, g_mx, g_my, 200, g_menu_n);
+
+    /* If no pointer/keyboard source has been found a few seconds after
+     * start, say so on the desktop (the serial log has the same info). */
+    if ((!g_input_ok_ptr || !g_input_ok_kbd) &&
+        time(NULL) - g_shell_t0 > 8) {
+        struct canvas c;
+        char ibuf[80];
+        const char *what = !g_input_ok_ptr ? "MOUSE" : "KEYBOARD";
+        snprintf(ibuf, sizeof(ibuf),
+                 "no %s device - see omnios-serial.log", what);
+        canvas_init(&c, &wm->screen, 0xff000000u, omni_rgb(0xff, 0xff, 0xcc));
+        canvas_text(&c, ibuf, 8, 24);
+    }
+
     cursor_draw();
 }
 
@@ -459,6 +476,9 @@ void omni_shell_run(void)
                  devs.ev_n, iptr, ikbd);
         omni_console_puts(ibuf);
     }
+    g_input_ok_ptr = (devs.ev_has_rel || devs.mice_fd >= 0) ? 1 : 0;
+    g_input_ok_kbd = (devs.ev_has_kbd || devs.tty_fd >= 0) ? 1 : 0;
+    g_shell_t0 = time(NULL);
 
     /* index 0 = display socket listener */
     pfds[0].fd = omni_wm_fd(&g_wm);
@@ -494,6 +514,8 @@ void omni_shell_run(void)
                 omni_devs_fill(&devs, &pfds[1]);
                 nfds_dev = omni_devs_nfds(&devs);
                 nfds = 1 + nfds_dev;
+                g_input_ok_ptr = (devs.ev_has_rel || devs.mice_fd >= 0) ? 1 : 0;
+                g_input_ok_kbd = (devs.ev_has_kbd || devs.tty_fd >= 0) ? 1 : 0;
             }
         }
 
