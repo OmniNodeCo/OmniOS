@@ -224,6 +224,13 @@ def _vmx(iso_name, version):
         # passed through (VMware's built-in virtual mouse also arrives over
         # the emulated PS/2 port, which needs no vmx setting at all).
         'usb.present = "TRUE"\n'
+        # network: NAT through the host, e1000 (built into the kernel);
+        # DHCP at boot, used by OmniOS Update
+        'ethernet0.present = "TRUE"\n'
+        'ethernet0.connectionType = "nat"\n'
+        'ethernet0.virtualDev = "e1000"\n'
+        'ethernet0.addressType = "generated"\n'
+        'ethernet0.startConnected = "TRUE"\n'
         'serial0.present = "TRUE"\n'
         'serial0.fileType = "file"\n'
         'serial0.fileName = "omnios-serial.log"\n'

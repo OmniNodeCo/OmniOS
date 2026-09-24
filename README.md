@@ -83,8 +83,10 @@ The actual OmniOS operating-system code is plain C, built statically against
 musl, and lives in `os/`:
 
 - **`os/kernel/`** — `ominit` the PID-1 init (mounts proc/sysfs/devtmpfs,
-  seeds /dev with mdev, starts the login shell + desktop, reaps orphans,
-  honours shutdown signals) and `ommount` its mount/device helpers.
+  seeds /dev with mdev, starts the login shell, the desktop, the network
+  (DHCP) and OmniOS Update, reaps orphans, honours shutdown signals, and
+  restarts straight into a downloaded update) and `ommount` its mount/device
+  helpers.
 - **`os/lib/`** — `osfb` framebuffer access, `raster` the 2-D software
   rasterizer, `canvas` the 8×8-font text layer, `input`/`devinput` keyboard
   and mouse decoding (evdev, PS/2 and tty), `gfx` the stb_image wrapper.
@@ -96,15 +98,26 @@ musl, and lives in `os/`:
   the changed 16-pixel blocks to the framebuffer, with the mouse cursor as
   a separate sprite; `theme` the drawing toolkit behind the look
   (generated wallpaper, rounded corners, shadows, frosted glass, gradients
-  and app icons); `catalog` the app catalog behind the Start menu and the
-  App Store; `desktop` the `omnios-desktop` executable.
+  and app icons); `icons` the vector pictograms for every app and Settings
+  page; `catalog` the app catalog behind the Start menu and the App Store;
+  `settings` the user's settings file (wallpaper, accent colour, clock,
+  time zone, updates, sign-in); `account` the sign-in account and its
+  password (`/etc/shadow`); `updstat` the OmniOS Update status shared by the
+  updater, Settings and the desktop; `desktop` the `omnios-desktop`
+  executable. The shell also draws the lock and sign-in screens (Windows +
+  L locks) and the update notifications.
 - **`os/apps/`** — bundled applications each running as its own client
   process: `omnios-term` (a real shell on a pseudo-terminal, shown through
   the VT100-subset emulator in `vt.c`), `omnios-files`, `omnios-calc`,
-  `omnios-edit`, `omnios-sysinfo`, `omnios-about`, and `omnios-store`, the
-  App Store, which installs and removes apps from the Start menu —
-  including `omnios-clock` and `omnios-snake`, which only come from the
-  store. The installed set lives in `/var/lib/omnios/installed-apps`.
+  `omnios-edit`, `omnios-sysinfo`, `omnios-about`, `omnios-settings` (the
+  Windows 11-style Settings app: System, Personalization, Apps, Accounts,
+  Time & language, OmniOS Update), and `omnios-store`, the App Store, which
+  installs and removes apps from the Start menu — including the ones that
+  only come from the store: `omnios-clock`, `omnios-snake`,
+  `omnios-taskmgr` (Task Manager), `omnios-calendar`, `omnios-mines`
+  (Minesweeper), `omnios-2048` and `omnios-tictactoe`. The installed set
+  lives in `/var/lib/omnios/installed-apps`. `omnios-update` is OmniOS
+  Update (below); it has no window of its own.
 
 The GUI model mirrors a real desktop: one display server owns /dev/fb0, and
 every application is a separate process that draws into its window over the
@@ -166,6 +179,42 @@ The ISO is produced two ways, chosen automatically:
 `tools/make-fat.py` builds a small FAT16 "superfloppy" EFI System Partition
 (`/EFI/BOOT/BOOTX64.EFI`) without requiring `dosfstools`/`mtools`.
 
+## OmniOS Update
+
+Like Windows Update, OmniOS keeps itself up to date:
+
+- At boot, `ominit` runs `/etc/init.d/network` (DHCP on every wired
+  adapter; the generated `.vmx` has a NAT adapter) and `omnios-update
+  daemon`, which checks a minute after the network comes up and then every
+  6 hours.
+- Each release publishes `omnios-update.txt` (version, file name, size,
+  SHA-256) next to its ISO, together with the kernel image it names. That
+  image is the whole OS, as the root file system is built into the kernel.
+  The updater reads the feed from
+  `https://github.com/<repo>/releases/latest/download/omnios-update.txt`
+  (`/etc/omnios-update.conf`).
+- With **Get updates automatically** on (Settings > OmniOS Update, the
+  default), a newer release is downloaded in the background and checked
+  against the size and SHA-256. Off, you get an "update available"
+  notification and a **Download & install** button instead.
+- The download is loaded with `kexec_file_load()` (`CONFIG_KEXEC_FILE`). A
+  notification, an amber dot on the update icon in the taskbar and on
+  **Restart** in Start say it is ready; restarting boots straight into the
+  new version (`reboot(RB_KEXEC)`) instead of going back through the
+  firmware. The settings, installed apps, password and update history
+  travel along in a small initramfs, so the new version starts where the old
+  one left off.
+
+Limits: OmniOS runs from RAM, so an installed update lasts until the
+computer is switched off. After a cold start from the old ISO the updater
+downloads it again (or use the new ISO). HTTPS goes through BusyBox `wget`,
+whose TLS code does not validate certificates: the SHA-256 catches damaged
+downloads, not an attacker who controls the network path.
+
+BusyBox 1.36.1's TLS miscomputes P-256 keys on x86_64, and GitHub rejects
+the handshake. `patches/busybox-tls-p256.patch` carries the two upstream
+fixes (made after 1.36.1); `scripts/build.sh fetch` applies it.
+
 ## Kernel tree edits
 
 Three minimal, justified edits (see `patches/kernel-omnios.patch`):
@@ -190,4 +239,5 @@ Three minimal, justified edits (see `patches/kernel-omnios.patch`):
   a UEFI-only fallback exists on hosts without xorriso/isolinux
 
 Next: boot `OmniOS-<version>-amd64.iso` in VMware (UEFI, via the bundled
-`.vmx`) and verify the desktop shell starts on the framebuffer.
+`.vmx`) and verify the desktop shell starts on the framebuffer, the network
+comes up and OmniOS Update reaches GitHub.

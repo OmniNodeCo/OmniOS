@@ -532,12 +532,12 @@ static void page_update(struct app *a)
         break;
     case UPD_READY:
         title = "Restart required";
-        snprintf(sub, sizeof(sub), "OmniOS %s is installed. Restart to start using it.", us->latest);
+        snprintf(sub, sizeof(sub), "Restart to finish installing OmniOS %s.", us->latest);
         btn = "Restart now";
         act = B_UPD_RESTART;
         break;
     case UPD_ERROR:
-        title = "Couldn't check for updates";
+        title = "Couldn't update";
         snprintf(sub, sizeof(sub), "%.150s", us->message[0] ? us->message : "Something went wrong.");
         btn = "Try again";
         break;
@@ -550,7 +550,21 @@ static void page_update(struct app *a)
     card(a, y, 110);
     omni_client_icon(c, CARD_X + 18, y + 26, 56, 0x3b82f6, 'U');
     omni_client_text2(c, CARD_X + 92, y + 30, C_INK, title);
-    omni_client_textt(c, CARD_X + 92, y + 58, C_DIM, sub);
+    {                           /* one or two lines under the title */
+        int maxc = (cw - 92 - 18) / 8, cut = (int)strlen(sub);
+        if (maxc > 20 && cut > maxc) {
+            for (cut = maxc; cut > 0 && sub[cut] != ' '; cut--)
+                ;
+            if (cut == 0)
+                cut = maxc;
+            snprintf(s, sizeof(s), "%.*s", cut, sub);
+            omni_client_textt(c, CARD_X + 92, y + 58, C_DIM, s);
+            snprintf(s, sizeof(s), "%.*s", maxc, sub + cut + (sub[cut] == ' '));
+            omni_client_textt(c, CARD_X + 92, y + 74, C_DIM, s);
+        } else {
+            omni_client_textt(c, CARD_X + 92, y + 58, C_DIM, sub);
+        }
+    }
     if (us->state == UPD_DOWNLOADING) {
         int bw = cw - 92 - 36, p = us->progress < 0 ? 0 : (us->progress > 100 ? 100 : us->progress);
         omni_client_rfill(c, CARD_X + 92, y + 78, bw, 6, 3, C_SEL);
@@ -558,11 +572,11 @@ static void page_update(struct app *a)
             omni_client_rfill(c, CARD_X + 92, y + 78, bw * p / 100 < 6 ? 6 : bw * p / 100, 6, 3, accent(a));
     }
     if (btn)
-        button(a, CARD_X + cw - 18 - 170, y + 22, 170, btn, 1, act);
+        button(a, CARD_X + cw - 18 - 160, y + 22, 160, btn, 1, act);
     y += 122;
 
     row_card(a, y, 64, "Get updates automatically",
-             "Download and install new versions as soon as they're available");
+             "Download new versions in the background");
     toggle(a, y + 21, a->set.autoupdate, T_AUTOUPD);
     y += 76;
 

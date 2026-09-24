@@ -69,6 +69,23 @@ jobs:
           scripts/build.sh kernel
           scripts/build.sh iso
 
+      # OmniOS Update (omnios-update) reads omnios-update.txt from the latest
+      # release and downloads the kernel image it names: the whole OS, as
+      # the root file system is built into the kernel.
+      - name: Update feed
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          k="omnios-bzImage-$VERSION"
+          test -s "build/out/$k"
+          {
+            echo "version=$VERSION"
+            echo "kernel=$k"
+            echo "size=$(stat -c %s "build/out/$k")"
+            echo "sha256=$(sha256sum "build/out/$k" | cut -d' ' -f1)"
+          } > build/out/omnios-update.txt
+          cat build/out/omnios-update.txt
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
@@ -78,5 +95,7 @@ jobs:
             build/out/*.iso
             build/out/*.iso.sha256
             build/out/*.vmx
+            build/out/omnios-bzImage-*
+            build/out/omnios-update.txt
           draft: false
           prerelease: false

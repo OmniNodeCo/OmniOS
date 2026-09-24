@@ -5,10 +5,13 @@
  *
  *   1. mount the virtual filesystems and seed /dev          (ommount.c)
  *   2. set the hostname, write /etc/motd to the console
- *   3. start a login shell on the console (getty) and launch the graphical
- *      desktop (/usr/bin/omnios-desktop)
+ *   3. start a login shell on the console (getty), the graphical desktop
+ *      (/usr/bin/omnios-desktop), the network (/etc/init.d/network: DHCP)
+ *      and OmniOS Update (/usr/bin/omnios-update daemon)
  *   4. reap orphans continuously — the classic PID-1 duty — and honour
  *      Ctrl-Alt-Del (reboot) / shutdown requests and SIGINT/SIGTERM.
+ *      A restart with a downloaded update loaded (kexec) boots straight
+ *      into the new version.
  *
  * It keeps running as a static musl binary with no other dependencies.
  */
@@ -96,6 +99,40 @@ static void setup_stdio(void)
     }
 }
 
+/* OmniOS Update has loaded a new version with kexec_file_load() */
+static int kexec_loaded(void)
+{
+    char c = '0';
+    int fd = open("/sys/kernel/kexec_loaded", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        if (read(fd, &c, 1) != 1)
+            c = '0';
+        close(fd);
+    }
+    return c == '1';
+}
+
+/* Restart into the update: let omnios-update reload it with the current
+ * settings (at most 15 s), then jump to the new kernel. Returns only if
+ * the kernel refused, and the caller restarts the ordinary way. */
+static void restart_into_update(void)
+{
+    char *args[] = { "/usr/bin/omnios-update", "restart", (char *)NULL };
+    pid_t pid = omni_spawn(args);
+    int i;
+
+    omni_log("OmniOS init: restarting into the downloaded update\n");
+    for (i = 0; pid > 0 && i < 150; i++) {
+        pid_t w = waitpid(pid, NULL, WNOHANG);
+        if (w == pid || w < 0)          /* done (or already reaped) */
+            break;
+        usleep(100000);
+    }
+    sync();
+    reboot(RB_KEXEC);
+    omni_log("OmniOS init: the update could not be started; restarting\n");
+}
+
 static void reboot_now(int cmd)
 {
     sync();
@@ -109,6 +146,8 @@ int main(int argc, char **argv)
 {
     char *sh_args[]      = { "/bin/sh", "-l", (char *)NULL };
     char *fbset_args[]   = { "/usr/bin/omnios-desktop", (char *)NULL };
+    char *net_args[]     = { "/bin/sh", "/etc/init.d/network", (char *)NULL };
+    char *update_args[]  = { "/usr/bin/omnios-update", "daemon", (char *)NULL };
     (void)argc; (void)argv;
 
     /* 1 is the PID; /init was the kernel's entry */
@@ -157,12 +196,21 @@ int main(int argc, char **argv)
     omni_spawn(sh_args);
     omni_spawn(fbset_args);
 
+    /* DHCP on every wired adapter, then OmniOS Update (it waits for the
+     * network by itself) */
+    if (access("/etc/init.d/network", R_OK) == 0)
+        omni_spawn(net_args);
+    if (access("/usr/bin/omnios-update", X_OK) == 0)
+        omni_spawn(update_args);
+
     omni_log("OmniOS init: services started, entering maintainer loop\n");
 
     for (;;) {
         if (g_shutdown || g_reboot) {
             omni_log("OmniOS init: mandated by signal\n");
             sync();
+            if (g_reboot && kexec_loaded())
+                restart_into_update();
             reboot_now(g_reboot ? RB_AUTOBOOT : RB_POWER_OFF);
         }
 

@@ -26,12 +26,14 @@ OUTDIR    := $(ROOT)/build/install/os/bin
 BIN       := omnios-desktop ominit omnios-term omnios-files omnios-calc \
              omnios-edit omnios-sysinfo omnios-about omnios-store \
              omnios-clock omnios-snake omnios-settings omnios-taskmgr \
-             omnios-calendar omnios-mines omnios-2048 omnios-tictactoe
+             omnios-calendar omnios-mines omnios-2048 omnios-tictactoe \
+             omnios-update
 
 # --- object lists -----------------------------------------------------
 LIB_OBJ := lib/raster.o lib/canvas.o lib/osfb.o lib/input.o lib/devinput.o
 GUI_OBJ := gui/wm.o gui/protocol.o gui/client.o gui/shell.o gui/desktop.o \
-           gui/catalog.o gui/theme.o gui/icons.o gui/settings.o gui/account.o
+           gui/catalog.o gui/theme.o gui/icons.o gui/settings.o gui/account.o \
+           gui/updstat.o
 KER_OBJ := kernel/ominit.o kernel/ommount.o
 
 APP_OBJ := apps/app.o
@@ -40,7 +42,7 @@ all: $(addprefix $(OUTDIR)/,$(BIN))
 
 # --- desktop shell -----------------------------------------------------
 $(OUTDIR)/omnios-desktop: gui/desktop.o gui/shell.o gui/wm.o gui/protocol.o \
-		gui/catalog.o gui/theme.o gui/icons.o gui/settings.o gui/account.o lib/raster.o lib/canvas.o lib/osfb.o lib/input.o \
+		gui/catalog.o gui/theme.o gui/icons.o gui/settings.o gui/account.o gui/updstat.o lib/raster.o lib/canvas.o lib/osfb.o lib/input.o \
 		lib/devinput.o lib/gfx.o
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
@@ -93,6 +95,11 @@ $(OUTDIR)/omnios-settings: apps/settings.o gui/settings.o gui/account.o \
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+# OmniOS Update: no window of its own (Settings and the desktop show it)
+$(OUTDIR)/omnios-update: apps/update.o gui/updstat.o gui/settings.o gui/catalog.o
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
+
 $(OUTDIR)/omnios-taskmgr: apps/taskmgr.o gui/client.o gui/protocol.o
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -121,7 +128,7 @@ lib/gfx.o: lib/gfx.c lib/omni.h
 kernel/ominit.o: kernel/ominit.c kernel/ominit.h
 kernel/ommount.o: kernel/ommount.c kernel/ominit.h
 gui/desktop.o: gui/shell.h
-gui/shell.o: gui/shell.h gui/wm.h gui/widgets.h gui/catalog.h gui/theme.h gui/settings.h gui/account.h
+gui/shell.o: gui/shell.h gui/wm.h gui/widgets.h gui/catalog.h gui/theme.h gui/settings.h gui/account.h gui/updstat.h
 gui/catalog.o: gui/catalog.h
 gui/theme.o: gui/theme.h gui/icons.h lib/omni.h
 gui/icons.o: gui/icons.h gui/theme.h lib/omni.h
@@ -129,6 +136,7 @@ gui/settings.o: gui/settings.h
 gui/account.o: gui/account.h
 gui/updstat.o: gui/updstat.h
 apps/settings.o: gui/settings.h gui/account.h gui/updstat.h gui/catalog.h gui/client.h gui/wm.h
+apps/update.o: gui/updstat.h gui/settings.h gui/catalog.h
 gui/wm.o: gui/wm.h gui/protocol.h gui/theme.h
 gui/protocol.o: gui/protocol.h
 gui/client.o: gui/client.h gui/protocol.h

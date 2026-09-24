@@ -226,6 +226,10 @@ stage_kernel() {
             --set-str INITRAMFS_SOURCE "$BLD/rootfs" \
             --enable INITRAMFS_COMPRESSION_GZIP
         make ARCH=x86_64 olddefconfig >/dev/null
+        # OmniOS Update needs these (a warning: the OS boots without them)
+        for opt in KEXEC_FILE E1000 VMXNET3; do
+            grep -q "^CONFIG_$opt=y" .config || warn "  kernel: CONFIG_$opt is off"
+        done
         make -j"$JOBS" bzImage
     )
     # collect the monolithic EFI-stub kernel

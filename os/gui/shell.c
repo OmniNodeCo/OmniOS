@@ -40,6 +40,7 @@
 #include "theme.h"
 #include "settings.h"
 #include "account.h"
+#include "updstat.h"
 #include "wm.h"
 
 /* ------------------------------------------------------------------ */
@@ -69,6 +70,11 @@
 #define HV_RESTART   200
 #define HV_SHUTDOWN  201
 #define HV_USER      202        /* the account in the Start footer: lock */
+#define HV_TRAY_UPD  203        /* OmniOS Update icon beside the clock    */
+#define HV_TOAST     210        /* the update notification ...            */
+#define HV_TOAST_GO  211        /* ... Restart now / Download             */
+#define HV_TOAST_LATER 212      /* ... Later                              */
+#define HV_TOAST_X   213        /* ... close                              */
 #define KEY_L        38
 #define HV_CAPTION   1000       /* + window id * 16 + chrome zone        */
 
@@ -377,11 +383,167 @@ struct tb_btn {
     int x, bw;
 };
 
+/* ------------------------------------------------------------------ */
+/* OmniOS Update: tray icon, notification, Start menu hint            */
+/* ------------------------------------------------------------------ */
+
+#define TOAST_W      372
+#define TOAST_H      124
+#define TOAST_BTN_W  112
+#define TOAST_BTN_H  28
+#define TOAST_SECS   12            /* the notification hides after this   */
+#define UPD_BADGE    0xf59e0b      /* amber dot: an update waits          */
+
+static struct omni_update_status g_upd;     /* omnios-update's last status */
+static struct timespec g_upd_mtime;
+static off_t  g_upd_size = -1;
+static char   g_toast_seen[48];             /* "<state>:<version>" shown   */
+static int    g_toast_on, g_toast_pending, g_toast_kind;
+static time_t g_toast_t;
+
+/* an update is available or downloaded (and isn't the one running: after
+ * restarting into it, the status says "ready" until the updater notices) */
+static int upd_tray_on(void)
+{
+    return (g_upd.state == UPD_READY || g_upd.state == UPD_AVAILABLE) &&
+           g_upd.latest[0] && strcmp(g_upd.latest, g_upd.current) != 0;
+}
+
+static int upd_ready(void)
+{
+    return upd_tray_on() && g_upd.state == UPD_READY;
+}
+
+/* the clock, plus the update icon when it shows */
+static int tray_w(void)
+{
+    return TB_TRAY_W + (upd_tray_on() ? 36 : 0);
+}
+
+static int tray_upd_x(void)
+{
+    return g_screen.w - TB_TRAY_W - 30;
+}
+
+static void spawn_arg(const char *path, const char *arg)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        execl(path, path, arg, (char *)NULL);
+        _exit(127);
+    }
+}
+
+static void open_update_settings(void)
+{
+    spawn_arg("/usr/bin/omnios-settings", "update");
+}
+
+static void toast_geom(int *x, int *y, int *bx, int *lx, int *by)
+{
+    *x = g_screen.w - TOAST_W - 12;
+    *y = g_screen.h - TASKBAR_H - TOAST_H - 12;
+    *lx = *x + TOAST_W - 16 - TOAST_BTN_W;       /* Later                */
+    *bx = *lx - 8 - TOAST_BTN_W;                  /* Restart now/Download */
+    *by = *y + TOAST_H - 14 - TOAST_BTN_H;
+}
+
+/* HV_TOAST_* under the point, 0 if not on the notification */
+static int toast_hit(int px, int py)
+{
+    int x, y, bx, lx, by;
+    if (!g_toast_on || g_locked)
+        return 0;
+    toast_geom(&x, &y, &bx, &lx, &by);
+    if (px < x || py < y || px >= x + TOAST_W || py >= y + TOAST_H)
+        return 0;
+    if (py >= by && py < by + TOAST_BTN_H) {
+        if (px >= bx && px < bx + TOAST_BTN_W)
+            return HV_TOAST_GO;
+        if (px >= lx && px < lx + TOAST_BTN_W)
+            return HV_TOAST_LATER;
+    }
+    if (px >= x + TOAST_W - 38 && py < y + 34)
+        return HV_TOAST_X;
+    return HV_TOAST;
+}
+
+static void draw_toast(void)
+{
+    struct raster *r = &g_screen;
+    int x, y, bx, lx, by, i, ready = g_toast_kind == UPD_READY;
+    const char *title = ready ? "Restart to finish updating" : "An update is available";
+    const char *go = ready ? "Restart now" : "Download";
+    char body[96];
+
+    if (!g_toast_on || g_locked)
+        return;
+    toast_geom(&x, &y, &bx, &lx, &by);
+    th_shadow(r, x, y, TOAST_W, TOAST_H, 10, 24, 8, 140);
+    th_frost(r, x, y, TOAST_W, TOAST_H, 10, 14);
+    th_round_rect(r, x, y, TOAST_W, TOAST_H, 10, 0xffffff, 40);
+    th_round_rect(r, x + 1, y + 1, TOAST_W - 2, TOAST_H - 2, 9, TH_PANEL, 224);
+
+    th_icon(r, x + 16, y + 13, 18, TH_ACCENT, 'U');
+    th_text(r, "OmniOS Update", x + 42, y + 18, TH_TEXT_DIM);
+    if (g_hover == HV_TOAST_X)                              /* close: X */
+        th_round_rect(r, x + TOAST_W - 36, y + 9, 26, 24, 5, 0xffffff, 32);
+    for (i = 0; i < 9; i++) {
+        th_px(r, x + TOAST_W - 27 + i, y + 17 + i, TH_TEXT_LIGHT, 230);
+        th_px(r, x + TOAST_W - 27 + i, y + 25 - i, TH_TEXT_LIGHT, 230);
+    }
+
+    th_text_bold(r, title, x + 16, y + 44, TH_TEXT_LIGHT);
+    snprintf(body, sizeof(body), ready ? "OmniOS %s is ready to install."
+                                       : "OmniOS %s can be downloaded now.",
+             g_upd.latest);
+    th_text(r, body, x + 16, y + 62, TH_TEXT_DIM);
+
+    th_round_rect(r, bx, by, TOAST_BTN_W, TOAST_BTN_H, 6,
+                  g_hover == HV_TOAST_GO ? th_shade(TH_ACCENT, 24) : TH_ACCENT, 255);
+    th_text(r, go, bx + (TOAST_BTN_W - (int)strlen(go) * 8) / 2, by + 10, 0xffffff);
+    th_round_rect(r, lx, by, TOAST_BTN_W, TOAST_BTN_H, 6, 0xffffff,
+                  g_hover == HV_TOAST_LATER ? 46 : 20);
+    th_text(r, "Later", lx + (TOAST_BTN_W - 40) / 2, by + 10, TH_TEXT_LIGHT);
+}
+
+/* once a second: has omnios-update written a new status? 1 = redraw */
+static int shell_poll_update(void)
+{
+    char p[512], seen[48], old_latest[32];
+    struct stat st;
+    int have, old_on = upd_tray_on(), old_state = g_upd.state;
+
+    snprintf(p, sizeof(p), "%s/status", omni_update_dir());
+    have = stat(p, &st) == 0;
+    if (have ? (st.st_mtim.tv_sec == g_upd_mtime.tv_sec &&
+                st.st_mtim.tv_nsec == g_upd_mtime.tv_nsec && st.st_size == g_upd_size)
+             : g_upd_size == -1)
+        return 0;
+    if (have)
+        g_upd_mtime = st.st_mtim;
+    g_upd_size = have ? st.st_size : -1;
+    snprintf(old_latest, sizeof(old_latest), "%s", g_upd.latest);
+    omni_update_read(&g_upd);
+    if (upd_tray_on()) {
+        snprintf(seen, sizeof(seen), "%d:%s", g_upd.state, g_upd.latest);
+        if (strcmp(seen, g_toast_seen) != 0) {      /* news: tell once */
+            snprintf(g_toast_seen, sizeof(g_toast_seen), "%s", seen);
+            g_toast_kind = g_upd.state;
+            g_toast_pending = 1;
+        }
+    } else {
+        g_toast_on = g_toast_pending = 0;   /* installed, failed, withdrawn */
+    }
+    return old_on != upd_tray_on() || old_state != g_upd.state ||
+           strcmp(old_latest, g_upd.latest) != 0;
+}
+
 /* one button per window, in stable (creation slot) order */
 static int taskbar_layout(struct tb_btn *b)
 {
     int i, n = 0, cnt = 0, x = START_W + 8, bw;
-    int end = g_screen.w - TB_TRAY_W;
+    int end = g_screen.w - tray_w();
 
     for (i = 0; i < OMNI_WM_MAX_WIN; i++)
         cnt += g_wm.wins[i].used ? 1 : 0;
@@ -468,6 +630,18 @@ static void draw_taskbar(void)
         else
             th_round_rect(r, b[i].x + b[i].bw / 2 - 4, y + TASKBAR_H - 7,
                           8, 3, 1, 0xffffff, 110);
+    }
+
+    /* OmniOS Update: an update is available (or ready: amber dot) */
+    if (upd_tray_on()) {
+        int ux = tray_upd_x();
+        if (g_hover == HV_TRAY_UPD)
+            th_round_rect(r, ux - 7, y + 6, 34, TASKBAR_H - 12, 6, 0xffffff, 26);
+        th_icon(r, ux, y + (TASKBAR_H - 20) / 2, 20, TH_ACCENT, 'U');
+        if (upd_ready()) {
+            th_round_rect(r, ux + 13, y + (TASKBAR_H - 20) / 2 - 3, 10, 10, 5, TH_TASKBAR, 255);
+            th_round_rect(r, ux + 14, y + (TASKBAR_H - 20) / 2 - 2, 8, 8, 4, UPD_BADGE, 255);
+        }
     }
 
     /* clock: time over date, right-aligned */
@@ -590,7 +764,10 @@ static void draw_menu(void)
         snprintf(sub, sizeof(sub), "Version %s", g_version);
     else
         snprintf(sub, sizeof(sub), "Built from scratch");
-    th_text(r, sub, g.x + 72, g.y + 46, TH_TEXT_DIM);
+    if (upd_ready())
+        th_text(r, "Update ready: restart to install", g.x + 72, g.y + 46, UPD_BADGE);
+    else
+        th_text(r, sub, g.x + 72, g.y + 46, TH_TEXT_DIM);
     th_fill_a(r, g.x + 16, g.y + MENU_HEAD_H, g.w - 32, 1, 0xffffff, 22);
 
     /* apps: icon, name, category */
@@ -617,6 +794,8 @@ static void draw_menu(void)
     th_icon(r, g.x + 16, g.foot_y + 15, 26, TH_ACCENT, 'u');
     th_text(r, g_user, g.x + 50, g.foot_y + 24, TH_TEXT_LIGHT);
     draw_pill(r, g.restart_x, g.pill_y, "Restart", g_hover == HV_RESTART);
+    if (upd_ready())                        /* restarting installs the update */
+        th_round_rect(r, g.restart_x + PILL_W - 13, g.pill_y + 4, 8, 8, 4, UPD_BADGE, 255);
     draw_pill(r, g.shutdown_x, g.pill_y, "Shut down", g_hover == HV_SHUTDOWN);
 }
 
@@ -861,6 +1040,7 @@ static void shell_finish(struct omni_wm *wm)
         return;
     }
     draw_taskbar();
+    draw_toast();
     if (g_menu_open)
         draw_menu();
     draw_banner();
@@ -905,11 +1085,18 @@ static int hover_key(void)
         if (k)
             return k;
     }
+    {
+        int k = toast_hit(g_px, g_py);
+        if (k)
+            return k;
+    }
     if (g_py >= g_screen.h - TASKBAR_H) {
         struct tb_btn b[OMNI_WM_MAX_WIN];
         int i, n;
         if (g_px < START_W)
             return HV_START;
+        if (upd_tray_on() && g_px >= tray_upd_x() - 7 && g_px < tray_upd_x() + 27)
+            return HV_TRAY_UPD;
         n = taskbar_layout(b);
         for (i = 0; i < n; i++)
             if (g_px >= b[i].x && g_px < b[i].x + b[i].bw)
@@ -957,12 +1144,34 @@ static int shell_button(int x, int y)
         return 1;
     }
 
+    switch (toast_hit(x, y)) {          /* the update notification */
+    case HV_TOAST_GO:
+        g_toast_on = 0;
+        if (g_toast_kind == UPD_READY)
+            power(1);                   /* init restarts into the update */
+        else
+            spawn_arg("/usr/bin/omnios-update", "install");
+        return 1;
+    case HV_TOAST_LATER:
+    case HV_TOAST_X:
+        g_toast_on = 0;
+        return 1;
+    case HV_TOAST:
+        g_toast_on = 0;
+        open_update_settings();
+        return 1;
+    }
+
     if (y >= g_screen.h - TASKBAR_H) {
         struct tb_btn b[OMNI_WM_MAX_WIN];
         int i, n;
 
         if (x < START_W) {
             open_menu();
+            return 1;
+        }
+        if (upd_tray_on() && x >= tray_upd_x() - 7 && x < tray_upd_x() + 27) {
+            open_update_settings();
             return 1;
         }
         /* window buttons: minimize the active window, else bring it up */
@@ -1321,7 +1530,7 @@ void omni_shell_run(void)
             } else if (e.type == 3 && e.key >= 4 && e.key <= 7) {
                 /* the wheel scrolls the window under the pointer */
                 if (e.pressed && !g_locked && !g_menu_open &&
-                    g_py < g_screen.h - TASKBAR_H)
+                    g_py < g_screen.h - TASKBAR_H && !toast_hit(g_px, g_py))
                     omni_wm_wheel(&g_wm, g_px, g_py, e.key);
             } else if (e.type == 3) {                 /* button */
                 if (g_locked) {
@@ -1348,6 +1557,19 @@ void omni_shell_run(void)
             settings_checked = t;
             if (shell_apply_settings(0))
                 need = 1;
+            if (shell_poll_update())            /* OmniOS Update news? */
+                need = 1;
+        }
+        if (g_toast_pending && !g_locked) {     /* held back while locked */
+            g_toast_pending = 0;
+            g_toast_on = 1;
+            g_toast_t = t;
+            need = 1;
+        }
+        if (g_toast_on && t - g_toast_t >= TOAST_SECS &&
+            !(g_hover >= HV_TOAST && g_hover <= HV_TOAST_X)) {
+            g_toast_on = 0;
+            need = 1;
         }
         localtime_r(&t, &tmv);
         if (tmv.tm_min != clock_last) {

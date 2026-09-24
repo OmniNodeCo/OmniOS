@@ -12,6 +12,9 @@ Layout produced:
     /init                    first process: mount, seed /dev, exec init
     /etc/inittab             BusyBox init (getty on tty1..2, ttyS0)
     /etc/init.d/rcS          sysinit hook (mdev, hostname, motd, DM)
+    /etc/init.d/network      DHCP on every wired adapter (started by ominit)
+    /usr/share/udhcpc/default.script   applies a DHCP lease
+    /etc/omnios-update.conf  where OmniOS Update finds new releases
     /etc/passwd, /etc/group
     /etc/profile             interactive ash environment
     /etc/omnios-release      identity
@@ -92,6 +95,54 @@ ttyS0::respawn:/sbin/getty -L ttyS0 115200 vt100
 ::ctrlaltdel:/sbin/reboot
 ::shutdown:/bin/umount -a -r
 ::shutdown:/bin/swapoff -a
+"""
+
+_NETWORK = """\
+#!/bin/sh
+# OmniOS /etc/init.d/network: started by ominit at boot. Loopback, then DHCP
+# on every wired adapter (VMware's e1000 / e1000e / vmxnet3 show up as eth0,
+# ...). udhcpc keeps the lease renewed in the background;
+# /usr/share/udhcpc/default.script applies it (address, route, DNS).
+export PATH=/usr/bin:/bin:/sbin:/usr/sbin
+ifconfig lo 127.0.0.1 netmask 255.0.0.0 up 2>/dev/null
+for dev in /sys/class/net/*; do
+    ifc=${dev##*/}
+    [ "$ifc" = lo ] && continue
+    [ -e "$dev/device" ] || continue            # hardware adapters only
+    ifconfig "$ifc" up 2>/dev/null
+    busybox udhcpc -i "$ifc" -b -t 5 -T 3 -A 10 -x hostname:"$(hostname)" \\
+        -s /usr/share/udhcpc/default.script >/dev/null 2>&1 &
+done
+exit 0
+"""
+
+_UDHCPC_SCRIPT = """\
+#!/bin/sh
+# udhcpc lease handler: address, default route and DNS for $interface.
+# shellcheck disable=SC2154  # udhcpc sets $interface, $ip, $router, $dns...
+export PATH=/usr/bin:/bin:/sbin:/usr/sbin
+case "$1" in
+deconfig)
+    ifconfig "$interface" 0.0.0.0 up
+    ;;
+bound|renew)
+    ifconfig "$interface" "$ip" ${subnet:+netmask "$subnet"} \\
+        ${broadcast:+broadcast "$broadcast"} up
+    if [ -n "$router" ]; then
+        while route del default dev "$interface" 2>/dev/null; do :; done
+        for r in $router; do
+            route add default gw "$r" dev "$interface" && break
+        done
+    fi
+    if [ -n "$dns" ]; then
+        : > /etc/resolv.conf.new
+        [ -n "$domain" ] && echo "search $domain" >> /etc/resolv.conf.new
+        for d in $dns; do echo "nameserver $d" >> /etc/resolv.conf.new; done
+        mv /etc/resolv.conf.new /etc/resolv.conf
+    fi
+    ;;
+esac
+exit 0
 """
 
 _RCS = """\
@@ -216,7 +267,8 @@ def main():
     # ---- directory skeleton ------------------------------------------------
     for d in ("bin", "sbin", "usr/bin", "usr/sbin", "usr/lib", "usr/share",
               "etc", "etc/init.d", "etc/fonts", "dev", "proc", "sys", "tmp",
-              "run", "var", "var/log", "var/run", "var/lib/omnios", "mnt",
+              "run", "var", "var/log", "var/run", "var/lib/omnios",
+              "var/lib/omnios/update", "usr/share/udhcpc", "mnt",
               "root", "home/omnios"):
         os.makedirs(os.path.join(OUT, d), exist_ok=True)
 
@@ -228,7 +280,8 @@ def main():
               "omnios-calc", "omnios-edit", "omnios-sysinfo", "omnios-about",
               "omnios-store", "omnios-clock", "omnios-snake",
               "omnios-settings", "omnios-taskmgr", "omnios-calendar",
-              "omnios-mines", "omnios-2048", "omnios-tictactoe"):
+              "omnios-mines", "omnios-2048", "omnios-tictactoe",
+              "omnios-update"):
         s = os.path.join(OS_BIN, b)
         if os.path.exists(s):
             dst = os.path.join(OUT, "usr", "bin", b)
@@ -292,6 +345,15 @@ def main():
     w("etc/hosts", "127.0.0.1 localhost omnios\n::1 localhost omnios\n")
     w("etc/shells", "/bin/sh\n/bin/ash\n")
     w("etc/resolv.conf", "nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
+    w("etc/init.d/network", _NETWORK, 0o755)
+    w("usr/share/udhcpc/default.script", _UDHCPC_SCRIPT, 0o755)
+    # OmniOS Update's release feed: this repository's latest GitHub release
+    # (a fork's CI builds point at the fork)
+    repo = os.environ.get("GITHUB_REPOSITORY") or "OmniNodeCo/OmniOS"
+    w("etc/omnios-update.conf",
+      "# OmniOS Update: the feed published with each release\n"
+      "url=https://github.com/%s/releases/latest/download/omnios-update.txt\n"
+      % repo)
     w("etc/fstab",
       "proc  /proc proc  defaults 0 0\n"
       "sysfs /sys sysfs defaults 0 0\n"
