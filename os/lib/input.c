@@ -56,6 +56,7 @@ static const struct omni_key kbd_scan[128] = {
     [83]    = {'.', '.'},
     [86]    = {'<', '>'},   /* 102nd */
     [96]    = {'\n', '\n'}, /* KP enter */
+    [98]    = {'/', '/'},   /* KP slash */
 };
 
 const struct omni_key *omni_kbd_table(void)

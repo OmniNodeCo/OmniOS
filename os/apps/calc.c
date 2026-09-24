@@ -22,9 +22,12 @@ static int    fresh = 1;
 
 static void update(struct app_win *a)
 {
+    int x = a->t.w - 20 - (int)strlen(disp) * 8;   /* right-aligned */
+    if (x < 16)
+        x = 16;
     omni_client_fill(&a->t.conn, 8, 8, a->t.w - 16, 40, 0xffffff);
     omni_client_rect(&a->t.conn, 8, 8, a->t.w - 16, 40, 0x101010);
-    omni_client_text(&a->t.conn, 20, 24, disp);
+    omni_client_textc(&a->t.conn, x, 24, 0x101010, 0xffffff, disp);
 }
 
 static void press(struct app_win *a, char c)
@@ -43,8 +46,17 @@ static void press(struct app_win *a, char c)
             size_t l = strlen(disp);
             disp[l] = '.'; disp[l + 1] = 0;
         }
-    } else if (c == 'C') {
+    } else if (c == 'C') {                 /* C: clear everything      */
         strcpy(disp, "0"); acc = 0; op = 0; fresh = 1;
+    } else if (c == 'E') {                 /* CE (Delete): clear entry */
+        strcpy(disp, "0"); fresh = 1;
+    } else if (c == 'B') {                 /* Backspace: last digit    */
+        size_t l = strlen(disp);
+        if (fresh || l <= 1 || (l == 2 && disp[0] == '-')) {
+            strcpy(disp, "0"); fresh = 1;
+        } else {
+            disp[l - 1] = 0;
+        }
     } else if (c == '+' || c == '-' || c == '*' || c == '/') {
         acc = atof(disp);
         op = c;
@@ -71,7 +83,9 @@ int main(void)
 
     omni_client_clear(&a.t.conn, 0xd8d8d8);
     update(&a);
-    omni_client_text(&a.t.conn, 16, 56, "Type: 0-9 . + - * / = C");
+    omni_client_textc(&a.t.conn, 16, 60, 0x101010, 0xd8d8d8, "Keys: 0-9 . + - * / = Enter");
+    omni_client_textc(&a.t.conn, 16, 74, 0x101010, 0xd8d8d8, "Backspace: last digit");
+    omni_client_textc(&a.t.conn, 16, 88, 0x101010, 0xd8d8d8, "Delete: CE    Esc or C: C");
 
     for (;;) {
         struct omni_client_event e;
@@ -87,9 +101,13 @@ int main(void)
         if (e.type == 1 && e.pressed) {
             if (e.text && strchr("0123456789.+-*/=", e.text))
                 press(&a, e.text);
-            else if (e.key == 14)
+            else if (e.text == 'c' || e.text == 'C' || e.key == 1 /* Esc */)
                 press(&a, 'C');
-            else if (e.key == 28)
+            else if (e.key == 111)                 /* Delete */
+                press(&a, 'E');
+            else if (e.key == 14)                  /* Backspace */
+                press(&a, 'B');
+            else if (e.key == 28 || e.key == 96)   /* Enter, keypad Enter */
                 press(&a, '=');
             else if (e.key == 2)  press(&a, '1');
             else if (e.key == 3)  press(&a, '2');

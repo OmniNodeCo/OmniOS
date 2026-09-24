@@ -38,22 +38,60 @@
 /* evdev                                                              */
 /* ------------------------------------------------------------------ */
 
-/* Per-open shift state tracked across the descriptor's lifetime. */
-static int ev_shift = 0;
+/* Modifier state, shared by both keyboard paths (only one is active). */
+static int kb_shift, kb_ctrl, kb_caps;
+
+/* Track a modifier key; returns 1 if `code` was one (consumed). */
+static int kb_modifier(int code, int value)
+{
+    switch (code) {
+    case KEY_LEFTSHIFT: case KEY_RIGHTSHIFT:
+        kb_shift = value != 0;
+        return 1;
+    case KEY_LEFTCTRL: case KEY_RIGHTCTRL:
+        kb_ctrl = value != 0;
+        return 1;
+    case KEY_CAPSLOCK:
+        if (value == 1)
+            kb_caps = !kb_caps;
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* The character a key press produces under the current modifiers:
+ * Caps Lock flips letter case, Ctrl+letter gives the control character
+ * (Ctrl+C = 0x03), exactly what a terminal expects. Keys without a
+ * character (arrows, Delete, F-keys, ...) give 0: apps use the keycode. */
+static char kb_char(int code)
+{
+    char ch = omni_key_char((unsigned)code, kb_shift);
+
+    if (kb_caps) {
+        if (ch >= 'a' && ch <= 'z')      ch = (char)(ch - 'a' + 'A');
+        else if (ch >= 'A' && ch <= 'Z') ch = (char)(ch - 'A' + 'a');
+    }
+    if (kb_ctrl) {
+        if (ch >= 'a' && ch <= 'z')              ch = (char)(ch - 'a' + 1);
+        else if (ch >= 'A' && ch <= 'Z')         ch = (char)(ch - 'A' + 1);
+        else if (ch == '[')                      ch = 0x1b;
+        else if (ch == '\\')                     ch = 0x1c;
+        else if (ch == ']')                      ch = 0x1d;
+        else if ((unsigned char)ch >= 32)        ch = 0;
+    }
+    return ch;
+}
 
 static void ev_key(int code, int value)
 {
     char ch = 0;
 
-    if (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT) {
-        ev_shift = value != 0;
+    if (kb_modifier(code, value))
         return;
-    }
-
-    if (value != 0)               /* press or repeat -> printable     */
-        ch = omni_key_char((unsigned)code, ev_shift);
-
-    omni_input_push_key(code, value, ev_shift, ch);
+    if (value != 0)               /* press or repeat -> character      */
+        ch = kb_char(code);
+    omni_input_push_key(code, value, kb_shift, ch);
 }
 
 /* Absolute axis value -> 0..65535 using the device's own range. */
@@ -188,72 +226,123 @@ static int read_mice(struct omni_devs *d, int fd)
 /* tty raw scancodes (fallback)                                       */
 /* ------------------------------------------------------------------ */
 
-/* The /dev/tty fallback delivers raw AT set-1 scancodes, while evdev
- * delivers Linux input event codes (linux/input.h).  The main block of
- * the keyboard happens to use identical numbers in both schemes, so
- * only the stragglers need translating before the shared lookup table. */
-static int at_to_linux_code(unsigned sc)
+/* The /dev/tty fallback is a terminal in raw termios mode. The keyboard
+ * itself is NOT switched to K_RAW, so the kernel's keymap has already
+ * turned keys into characters and VT escape sequences ("a", "\r", 0x7f,
+ * "\033[3~" for Delete, "\033[A" for Up): decode those back into key
+ * events. (The old code read these bytes as AT scancodes, so typed "a"
+ * became a bogus key and Delete was never recognised.) */
+
+/* keycode for a printable character, via the shared keymap */
+static int tty_char_key(unsigned char c, int *shift)
 {
-    switch (sc) {
-    case 0x3d: return KEY_SPACE;      /* 61  space                       */
-    case 0x69: return KEY_KP1;        /* 105 numpad 1                    */
-    case 0x72: return KEY_KP2;        /* 114 numpad 2                    */
-    case 0x7b: return KEY_KP3;        /* 123 numpad 3                    */
-    case 0x70: return KEY_KP4;        /* 112 numpad 4                    */
-    case 0x71: return KEY_KP5;        /* 113 numpad 5                    */
-    case 0x7a: return KEY_KP6;        /* 122 numpad 6                    */
-    case 0x75: return KEY_KP7;        /* 117 numpad 7                    */
-    case 0x76: return KEY_KP8;        /* 118 numpad 8                    */
-    case 0x77: return KEY_KP9;        /* 119 numpad 9                    */
-    case 0x6b: return KEY_KP0;        /* 107 numpad 0                    */
-    case 0x6e: return KEY_KPDOT;      /* 110 numpad .                    */
-    case 0x54: return KEY_KPPLUS;     /* 84  numpad +                    */
-    case 0x52: return KEY_KPMINUS;    /* 82  numpad -                    */
-    default:   return (int)sc;
+    int code;
+    for (code = 1; code < 128; code++) {
+        if (omni_key_char((unsigned)code, 0) == (char)c) { *shift = 0; return code; }
+        if (omni_key_char((unsigned)code, 1) == (char)c) { *shift = 1; return code; }
+    }
+    return 0;
+}
+
+static void tty_emit(int code, char ch)
+{
+    if (code <= 0)
+        return;
+    omni_input_push_key(code, 1, 0, ch);  /* a tty has no key releases: */
+    omni_input_push_key(code, 0, 0, 0);   /* synthesize press + release  */
+}
+
+/* key for the escape sequence body after ESC ("[3~", "OA", "[A", ...) */
+static int tty_seq_key(const char *q)
+{
+    static const struct { const char *seq; int code; } t[] = {
+        { "[A", KEY_UP },     { "[B", KEY_DOWN },    { "[C", KEY_RIGHT },
+        { "[D", KEY_LEFT },   { "OA", KEY_UP },      { "OB", KEY_DOWN },
+        { "OC", KEY_RIGHT },  { "OD", KEY_LEFT },    { "[H", KEY_HOME },
+        { "[F", KEY_END },    { "OH", KEY_HOME },    { "OF", KEY_END },
+        { "[1~", KEY_HOME },  { "[7~", KEY_HOME },   { "[4~", KEY_END },
+        { "[8~", KEY_END },   { "[2~", KEY_INSERT }, { "[3~", KEY_DELETE },
+        { "[5~", KEY_PAGEUP },{ "[6~", KEY_PAGEDOWN },
+        { "[[A", KEY_F1 },    { "[[B", KEY_F2 },     { "[[C", KEY_F3 },
+        { "[[D", KEY_F4 },    { "[[E", KEY_F5 },     { "OP", KEY_F1 },
+        { "OQ", KEY_F2 },     { "OR", KEY_F3 },      { "OS", KEY_F4 },
+    };
+    size_t i;
+    for (i = 0; i < sizeof(t) / sizeof(t[0]); i++)
+        if (strcmp(q, t[i].seq) == 0)
+            return t[i].code;
+    return 0;
+}
+
+/* escape-sequence state survives across reads (bytes may be split) */
+static char tty_seq[8];
+static int  tty_seqlen = -1;          /* -1: not inside a sequence */
+
+static int tty_seq_done(void)
+{
+    char last = tty_seq[tty_seqlen - 1];
+    if (tty_seqlen == 1)
+        return tty_seq[0] != '[' && tty_seq[0] != 'O';   /* ESC x: Alt+x */
+    if (tty_seqlen == 2 && tty_seq[0] == '[' && tty_seq[1] == '[')
+        return 0;                                      /* "[[A": F-key */
+    return (last >= 'A' && last <= 'Z') || last == '~' ||
+           tty_seqlen >= (int)sizeof(tty_seq) - 1;
+}
+
+static void tty_byte(unsigned char c)
+{
+    int shift = 0, code;
+
+    if (tty_seqlen >= 0) {                       /* inside ESC ...  */
+        tty_seq[tty_seqlen++] = (char)c;
+        tty_seq[tty_seqlen] = '\0';
+        if (tty_seq_done()) {
+            tty_emit(tty_seq_key(tty_seq), 0);
+            tty_seqlen = -1;
+        }
+        return;
+    }
+    switch (c) {
+    case 0x1b: tty_seqlen = 0; tty_seq[0] = '\0'; return;
+    case '\r': case '\n': tty_emit(KEY_ENTER, '\n'); return;
+    case 0x7f: case 0x08: tty_emit(KEY_BACKSPACE, 0x08); return;
+    case '\t': tty_emit(KEY_TAB, '\t'); return;
+    default: break;
+    }
+    if (c >= 1 && c <= 26) {                     /* Ctrl+letter     */
+        tty_emit(tty_char_key((unsigned char)('a' + c - 1), &shift), (char)c);
+        return;
+    }
+    if (c >= 32 && c < 127) {
+        code = tty_char_key(c, &shift);
+        tty_emit(code, (char)c);
     }
 }
 
 static int read_tty(struct omni_devs *d, int fd)
 {
-    unsigned char raw;
-    ssize_t n;
-    int shift = 0;
+    unsigned char buf[64];
+    ssize_t n, i;
 
     (void)d;
     for (;;) {
-        n = read(fd, &raw, 1);
+        n = read(fd, buf, sizeof(buf));
         if (n < 0) {
             if (errno == EAGAIN || errno == EWOULDBLOCK)
-                return 0;
+                break;
             return -1;
         }
-        if (n < 1)
-            return 0;
-
-        if (raw == 0xe0) {      /* extended prefix */
-            unsigned char ext;
-            if (read(fd, &ext, 1) != 1)
-                continue;
-            if (ext == 0x53)    /* extended backspace (e0 53) */
-                omni_input_push_key(KEY_BACKSPACE, 1, shift, 0x08);
-            continue;
-        }
-        if (raw == 0xaa || raw == 0xb6) { shift = 0; continue; }
-        if (raw & 0x80) {       /* release */
-            int code = at_to_linux_code(raw & 0x7f);
-            omni_input_push_key(code, 0, shift, 0);
-            continue;
-        }
-        if (raw == 0x2a || raw == 0x36) { /* shift make */
-            shift = 1;
-            continue;
-        }
-        {
-            int code = at_to_linux_code(raw);
-            char ch = omni_key_char(code, shift);
-            omni_input_push_key(code, 1, shift, ch);
-        }
+        if (n == 0)
+            break;
+        for (i = 0; i < n; i++)
+            tty_byte(buf[i]);
     }
+    /* a lone ESC with nothing after it in this burst is the Esc key */
+    if (tty_seqlen == 0) {
+        tty_emit(KEY_ESC, 0x1b);
+        tty_seqlen = -1;
+    }
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */

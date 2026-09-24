@@ -60,7 +60,7 @@ $(OUTDIR)/omnios-calc: apps/calc.o $(APP_OBJ) gui/client.o gui/protocol.o
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
-$(OUTDIR)/omnios-edit: apps/edit.o $(APP_OBJ) gui/client.o gui/protocol.o
+$(OUTDIR)/omnios-edit: apps/edit.o gui/client.o gui/protocol.o
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
@@ -89,7 +89,7 @@ apps/terminal.o: apps/vt.h gui/client.h gui/wm.h
 apps/vt.o: apps/vt.h
 apps/files.o: apps/app.h
 apps/calc.o: apps/app.h
-apps/edit.o: apps/app.h
+apps/edit.o: gui/client.h gui/wm.h
 apps/sysinfo.o: apps/app.h
 apps/about.o: apps/app.h
 lib/raster.o lib/canvas.o lib/osfb.o lib/input.o lib/devinput.o: lib/omni.h
