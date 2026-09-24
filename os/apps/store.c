@@ -30,6 +30,8 @@
 #define LIST_Y    (HEADER_H + 4)
 #define ROW_H     44
 #define FOOTER_H  28
+#define SB_W      6               /* scrollbar (when the list scrolls)  */
+#define SB_X      (WIN_W - 10)
 #define BTN_W     92
 #define BTN_H     24
 #define BTN_X     (WIN_W - 16 - BTN_W)
@@ -195,13 +197,22 @@ static void store_draw(struct omni_client_conn *c, struct store *s)
     omni_client_fill(c, 0, HEADER_H, WIN_W, s->h - HEADER_H, C_WHITE);
     for (r = 0; r < s->rows && s->top + r < omni_catalog_n; r++)
         draw_row(c, s, s->top + r, LIST_Y + r * ROW_H);
+    if (omni_catalog_n > s->rows) {             /* scrollbar */
+        int th = list_h * s->rows / omni_catalog_n;
+        int ty = LIST_Y + list_h * s->top / omni_catalog_n;
+        if (th < 24)
+            th = 24;
+        if (ty + th > LIST_Y + list_h)
+            ty = LIST_Y + list_h - th;
+        omni_client_rfill(c, SB_X, LIST_Y, SB_W, list_h, SB_W / 2, C_RULE);
+        omni_client_rfill(c, SB_X, ty, SB_W, th, SB_W / 2, C_BORDER);
+    }
 
     omni_client_fill(c, 0, s->h - FOOTER_H, WIN_W, FOOTER_H, C_FOOTER);
     omni_client_fill(c, 0, s->h - FOOTER_H, WIN_W, 1, C_RULE);
     omni_client_textt(c, 16, s->h - FOOTER_H + 10, C_FOOT_TX,
                       s->status[0] ? s->status
                       : "Up/Down select - Enter get/remove - Del remove - Esc close");
-    (void)list_h;
 }
 
 /* short progress bar inside the button while "installing" */
@@ -223,6 +234,21 @@ static void toggle(struct omni_client_conn *c, struct store *s)
     if (want && !omni_catalog[i].system && app_present(i))
         animate_install(c, s);
     store_set(s, i, want);
+}
+
+/* scroll the list by d rows, keeping the selection in view */
+static void store_scroll(struct store *s, int d)
+{
+    int max_top = omni_catalog_n - s->rows;
+    s->top += d;
+    if (s->top > max_top)
+        s->top = max_top;
+    if (s->top < 0)
+        s->top = 0;
+    if (s->sel < s->top)
+        s->sel = s->top;
+    if (s->sel >= s->top + s->rows)
+        s->sel = s->top + s->rows - 1;
 }
 
 /* row index under content y, or -1 */
@@ -269,7 +295,16 @@ int main(void)
             continue;
         while ((r = omni_client_poll(&conn, &e)) > 0) {
             if (e.type == 3) { quit = 1; break; }
-            if (e.type == 2 && e.pressed) {                  /* click   */
+            if (e.type == 4 && (e.key == 4 || e.key == 5)) { /* wheel   */
+                store_scroll(&g_st, e.key == 4 ? -2 : 2);
+                changed = 1;
+            } else if (e.type == 2 && e.pressed && e.x >= SB_X - 4 &&
+                       omni_catalog_n > g_st.rows && e.y >= LIST_Y &&
+                       e.y < LIST_Y + g_st.rows * ROW_H) {  /* scrollbar: page */
+                int ty = LIST_Y + g_st.rows * ROW_H * g_st.top / omni_catalog_n;
+                store_scroll(&g_st, e.y < ty ? -g_st.rows : g_st.rows);
+                changed = 1;
+            } else if (e.type == 2 && e.pressed) {           /* click   */
                 int i = row_at(&g_st, e.y);
                 if (i >= 0) {
                     int by = LIST_Y + (i - g_st.top) * ROW_H + (ROW_H - BTN_H) / 2;

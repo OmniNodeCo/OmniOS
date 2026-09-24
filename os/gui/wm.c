@@ -354,8 +354,38 @@ int omni_wm_hit(struct omni_win *w, int x, int y)
     return 0;
 }
 
+/* The wheel scrolls the app under the pointer (a BTN message with button
+ * 4-7) and nothing else: no raise, no drag, no caption buttons. The wheel
+ * sends presses without releases, so treated as a click it would start a
+ * drag that never ends, or close a window scrolled over its X. */
+void omni_wm_wheel(struct omni_wm *wm, int x, int y, int btn)
+{
+    struct omni_win *w = omni_wm_at(wm, x, y);
+    char line[128];
+    long num[5];
+
+    if (!w || w->minimized || omni_wm_hit(w, x, y) != 0 ||
+        y - w->y < OMNI_WM_TITLE_H)
+        return;                             /* frame, caption, edges */
+    if (w->client < 0 || w->client >= OMNI_WM_MAX_CLI ||
+        wm->clients[w->client].fd < 0)
+        return;
+    num[0] = w->id;
+    num[1] = x - w->x;
+    num[2] = y - w->y - OMNI_WM_TITLE_H;
+    num[3] = btn;
+    num[4] = 1;
+    proto_build(line, sizeof(line), "BTN", 5, num);
+    send_line(wm->clients[w->client].fd, line);
+}
+
 int omni_wm_button(struct omni_wm *wm, int x, int y, int btn, int pressed)
 {
+    if (btn >= 4 && btn <= 7) {             /* the wheel is not a click */
+        if (pressed)
+            omni_wm_wheel(wm, x, y, btn);
+        return 0;
+    }
     if (pressed) {
         struct omni_win *w = omni_wm_at(wm, x, y);
         int zone;

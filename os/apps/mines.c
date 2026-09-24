@@ -258,7 +258,7 @@ int main(void)
                 } else if (e.x >= BX && e.y >= BY && gx < GW && gy < GH) {
                     g_cx = gx;
                     g_cy = gy;
-                    if (e.key == 273)
+                    if (e.key == 3)           /* right button: flag */
                         flag(gx, gy);
                     else
                         reveal(gx, gy);

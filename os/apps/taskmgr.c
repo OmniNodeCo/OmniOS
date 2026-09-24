@@ -323,6 +323,19 @@ int main(void)
         while (r > 0 && !quit && (r = omni_client_poll(&conn, &e)) > 0) {
             if (e.type == 3) {
                 quit = 1;
+            } else if (e.type == 4 && (e.key == 4 || e.key == 5) && g_np > g_rows) {
+                int top = g_top + (e.key == 4 ? -3 : 3), si = -1, i;   /* wheel */
+                if (top > g_np - g_rows)
+                    top = g_np - g_rows;
+                if (top < 0)
+                    top = 0;
+                for (i = 0; i < g_np; i++)
+                    if (g_p[i].pid == g_sel_pid)
+                        si = i;
+                g_top = top;
+                if (si >= 0 && (si < top || si >= top + g_rows))
+                    select_index(si < top ? top : top + g_rows - 1);
+                changed = 1;
             } else if (e.type == 2 && e.pressed) {
                 if (e.y >= LIST_Y && e.y < LIST_Y + g_rows * ROW_H) {
                     select_index(g_top + (e.y - LIST_Y) / ROW_H);

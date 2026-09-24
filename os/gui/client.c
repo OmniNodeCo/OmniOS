@@ -274,7 +274,7 @@ int omni_client_poll(struct omni_client_conn *c, struct omni_client_event *e)
         return 1;
     }
     if (strcmp(m.verb, "BTN") == 0 && m.n >= 5) {
-        e->type = 2;
+        e->type = (m.num[3] >= 4 && m.num[3] <= 7) ? 4 : 2;    /* wheel */
         e->x = (int)m.num[1];
         e->y = (int)m.num[2];
         e->key = (int)m.num[3];

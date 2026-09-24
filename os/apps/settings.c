@@ -901,7 +901,7 @@ int main(int argc, char **argv)
             while (!quit && (r = omni_client_poll(&a->c, &e)) > 0) {
                 if (e.type == 3) {
                     quit = 1;
-                } else if (e.type == 2 && e.pressed && e.key == 272) {
+                } else if (e.type == 2 && e.pressed && e.key == 1) {
                     int zi = zone_at(a, e.x, e.y);
                     if (zi >= 0) {
                         struct zone z = a->z[zi];

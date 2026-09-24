@@ -104,6 +104,8 @@ struct omni_win *omni_wm_at(struct omni_wm *wm, int x, int y);
  * 10 minimize */
 int  omni_wm_hit(struct omni_win *w, int x, int y);
 int  omni_wm_button(struct omni_wm *wm, int x, int y, int btn, int pressed);
+/* mouse wheel (buttons 4-7): to the app under the pointer, content only */
+void omni_wm_wheel(struct omni_wm *wm, int x, int y, int btn);
 int  omni_wm_motion(struct omni_wm *wm, int x, int y);
 int  omni_wm_key(struct omni_wm *wm, int key, int pressed, char ch);
 

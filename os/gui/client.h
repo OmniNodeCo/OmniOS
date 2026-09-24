@@ -40,7 +40,8 @@ int  omni_client_textc(struct omni_client_conn *c, int x, int y,
 /* retrieve one pending event from the server: 1 = got event, 0 = none,
  * -1 = disconnected. Event semantics mirror struct omni_input + win id.  */
 struct omni_client_event {
-    int  type;             /* 1 key, 2 button, 3 closed */
+    int  type;             /* 1 key, 2 button, 3 closed, 4 wheel (key: 4 up,
+                              5 down, 6 left, 7 right; x, y = pointer) */
     int  key;
     int  pressed;
     char text;

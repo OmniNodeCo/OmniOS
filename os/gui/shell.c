@@ -1318,6 +1318,11 @@ void omni_shell_run(void)
                 if (!g_locked)
                     omni_wm_motion(&g_wm, g_px, g_py);  /* drags mark dirty */
                 moved = 1;
+            } else if (e.type == 3 && e.key >= 4 && e.key <= 7) {
+                /* the wheel scrolls the window under the pointer */
+                if (e.pressed && !g_locked && !g_menu_open &&
+                    g_py < g_screen.h - TASKBAR_H)
+                    omni_wm_wheel(&g_wm, g_px, g_py, e.key);
             } else if (e.type == 3) {                 /* button */
                 if (g_locked) {
                     if (e.pressed && lock_button(g_px, g_py))

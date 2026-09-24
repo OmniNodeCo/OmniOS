@@ -263,6 +263,18 @@ int main(void)
                     break;
                 default: break;
                 }
+            } else if (e.type == 4 && (e.key == 4 || e.key == 5) && g_n > g_rows) {
+                int top = g_top + (e.key == 4 ? -3 : 3), s = g_sel;    /* wheel */
+                if (top > g_n - g_rows)
+                    top = g_n - g_rows;
+                if (top < 0)
+                    top = 0;
+                g_top = top;
+                if (s < top)
+                    s = top;
+                if (s >= top + g_rows)
+                    s = top + g_rows - 1;
+                select_row(&a, s);
             } else if (e.type == 2 && e.pressed) {
                 int row = e.y >= g_list_y ? (e.y - g_list_y) / ROW_H : -1;
                 if (row >= 0 && row < g_rows && g_top + row < g_n) {
