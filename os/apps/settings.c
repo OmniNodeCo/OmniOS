@@ -5,11 +5,13 @@
  * pages of cards on the right.
  *
  *   System           display, processor, memory, uptime
- *   Personalization  wallpaper and accent colour
+ *   Network & internet  connection, IP address, DNS, traffic
+ *   Personalization  wallpaper, accent colour, taskbar, desktop icons
  *   Apps             installed apps, link to the App Store
  *   Accounts         password, sign-in screen, lock screen
  *   Time & language  time zone, 24-hour clock
- *   OmniOS Update    check / download / restart, automatic updates, history
+ *   OmniOS Update    check / download / restart, pause, automatic updates,
+ *                    history
  *
  * Changes are saved to the settings file at once; the desktop applies them
  * within a second. Mouse: click anything. Keyboard: Up/Down change page,
@@ -33,6 +35,7 @@
 #include "../gui/account.h"
 #include "../gui/catalog.h"
 #include "../gui/client.h"
+#include "../gui/netinfo.h"
 #include "../gui/settings.h"
 #include "../gui/updstat.h"
 #include "../gui/wm.h"          /* OMNI_WM_TITLE_H */
@@ -59,17 +62,19 @@
 enum { K_ESC = 1, K_BACKSPACE = 14, K_TAB = 15, K_ENTER = 28, K_SPACE = 57,
        K_KPENTER = 96, K_UP = 103, K_LEFT = 105, K_RIGHT = 106, K_DOWN = 108 };
 
-enum { PG_SYSTEM, PG_PERSONAL, PG_APPS, PG_ACCOUNTS, PG_TIME, PG_UPDATE, PG_COUNT };
+enum { PG_SYSTEM, PG_NETWORK, PG_PERSONAL, PG_APPS, PG_ACCOUNTS, PG_TIME, PG_UPDATE,
+       PG_COUNT };
 static const struct { const char *name; char icon; } g_pages[PG_COUNT] = {
-    { "System", 'm' }, { "Personalization", 'p' }, { "Apps", 'a' },
-    { "Accounts", 'u' }, { "Time & language", 't' }, { "OmniOS Update", 'U' },
+    { "System", 'm' }, { "Network & internet", 'w' }, { "Personalization", 'p' },
+    { "Apps", 'a' }, { "Accounts", 'u' }, { "Time & language", 't' },
+    { "OmniOS Update", 'U' },
 };
 
 /* clickable zones, rebuilt on every redraw */
-enum { Z_NAV, Z_WALL, Z_ACCENT, Z_TOGGLE, Z_ZPREV, Z_ZNEXT, Z_BUTTON, Z_FIELD };
-enum { T_CLOCK24, T_AUTOUPD, T_SIGNIN };
+enum { Z_NAV, Z_WALL, Z_ACCENT, Z_TOGGLE, Z_ZPREV, Z_ZNEXT, Z_BUTTON, Z_FIELD, Z_ALIGN };
+enum { T_CLOCK24, T_AUTOUPD, T_SIGNIN, T_DESKICONS };
 enum { B_STORE, B_PW_OPEN, B_PW_SAVE, B_PW_CANCEL, B_UPD_CHECK, B_UPD_INSTALL,
-       B_UPD_RESTART };
+       B_UPD_RESTART, B_UPD_PAUSE, B_UPD_RESUME };
 
 struct zone { int x, y, w, h, kind, arg; };
 
@@ -274,6 +279,77 @@ static void page_system(struct app *a)
     row_card(a, y, 52, "Storage", "OmniOS runs from memory: changes last until you restart");
 }
 
+static void bytes_text(unsigned long long b, char *out, size_t n)
+{
+    if (b >= 1024ULL * 1024 * 1024)
+        snprintf(out, n, "%.1f GB", (double)b / (1024.0 * 1024 * 1024));
+    else if (b >= 1024ULL * 1024)
+        snprintf(out, n, "%.1f MB", (double)b / (1024.0 * 1024));
+    else
+        snprintf(out, n, "%llu KB", b / 1024);
+}
+
+static void page_network(struct app *a)
+{
+    struct omni_client_conn *c = &a->c;
+    struct omni_netinfo n;
+    char s[128], rx[32], tx[32];
+    int y = 62, cw = card_w(a), i, up;
+    const char *keys[7] = { "IPv4 address", "Subnet mask", "Default gateway", "DNS servers",
+                            "Physical address (MAC)", "Link speed", "Sent / received" };
+    const char *vals[7];
+    char speed[32];
+
+    omni_net_read(&n);
+    up = n.state == NET_ONLINE || n.state == NET_LOCAL;
+    card(a, y, 96);
+    omni_client_icon(c, CARD_X + 18, y + 20, 56, 0x0ea5e9, 'w');
+    omni_client_text2(c, CARD_X + 92, y + 26, C_INK,
+                      n.state == NET_NO_ADAPTER ? "No network adapter" : "Ethernet");
+    if (n.state == NET_NO_ADAPTER)
+        snprintf(s, sizeof(s), "OmniOS didn't find a wired network adapter");
+    else
+        snprintf(s, sizeof(s), "%s - %s", omni_net_state_text(n.state), n.ifname);
+    omni_client_textt(c, CARD_X + 92, y + 54, up ? C_OK : C_DIM, s);
+    if (up) {
+        int px = CARD_X + cw - 18 - 110;
+        omni_client_rfill(c, px, y + 34, 110, 28, 14, 0xdcfce7);
+        omni_client_rfill(c, px + 14, y + 44, 8, 8, 4, C_OK);
+        omni_client_textt(c, px + 30, y + 44, C_OK, n.state == NET_ONLINE ? "Online" : "Local");
+    }
+    y += 108;
+
+    bytes_text(n.rx, rx, sizeof(rx));
+    bytes_text(n.tx, tx, sizeof(tx));
+    snprintf(s, sizeof(s), "%s / %s", tx, rx);
+    if (n.speed >= 1000 && n.speed % 1000 == 0)
+        snprintf(speed, sizeof(speed), "%d Gbps", n.speed / 1000);
+    else if (n.speed > 0)
+        snprintf(speed, sizeof(speed), "%d Mbps", n.speed);
+    else
+        snprintf(speed, sizeof(speed), "-");
+    vals[0] = n.ip[0] ? n.ip : "-";
+    vals[1] = n.mask[0] ? n.mask : "-";
+    vals[2] = n.gateway[0] ? n.gateway : "-";
+    vals[3] = n.dns[0] ? n.dns : "-";
+    vals[4] = n.mac[0] ? n.mac : "-";
+    vals[5] = speed;
+    vals[6] = s;
+    card(a, y, 48 + 7 * 30);
+    omni_client_textt(c, CARD_X + 18, y + 18, C_INK, "Properties");
+    omni_client_fill(c, CARD_X + 18, y + 40, cw - 36, 1, C_BORDER);
+    for (i = 0; i < 7; i++) {
+        int ry = y + 48 + i * 30;
+        omni_client_textt(c, CARD_X + 18, ry + 8, C_DIM, keys[i]);
+        right_fit(a, ry + 8, C_INK, vals[i], 23);
+    }
+    y += 48 + 7 * 30 + 14;
+    omni_client_textt(c, CARD_X + 4, y, C_DIM,
+                      "OmniOS gets an address automatically (DHCP) as soon as a");
+    omni_client_textt(c, CARD_X + 4, y + 14, C_DIM,
+                      "network cable is connected; VMware's NAT network works as is.");
+}
+
 static void wall_thumb(struct app *a, int x, int y, int w, int h, int i)
 {
     const struct omni_wallinfo *wi = &omni_walls[i];
@@ -296,19 +372,22 @@ static void page_personal(struct app *a)
     char s[64];
 
     /* preview: a small desktop with a window and the taskbar */
-    card(a, y, 170);
-    wall_thumb(a, x0, y + 18, 224, 134, a->set.wallpaper);
-    omni_client_rfill(c, x0 + 58, y + 44, 110, 64, 5, 0xffffff);
-    omni_client_fill(c, x0 + 58 + 5, y + 44 + 14, 100, 1, C_BORDER);
-    omni_client_rfill(c, x0 + 66, y + 66, 60, 5, 2, ac);
-    omni_client_rfill(c, x0 + 66, y + 78, 84, 4, 2, C_BORDER);
-    omni_client_fill(c, x0, y + 18 + 134 - 14, 224, 14, 0x0b1020);
-    omni_client_rfill(c, x0 + 100, y + 18 + 134 - 4, 24, 2, 1, ac);
-    omni_client_textt(c, x0 + 248, y + 40, C_DIM, "Background");
-    omni_client_text2(c, x0 + 248, y + 54, C_INK, omni_walls[a->set.wallpaper % omni_walls_n].name);
-    omni_client_textt(c, x0 + 248, y + 96, C_DIM, "Accent color");
-    omni_client_text2(c, x0 + 248, y + 110, C_INK, omni_accents[a->set.accent % omni_accents_n].name);
-    y += 182;
+    card(a, y, 128);
+    wall_thumb(a, x0, y + 10, 180, 108, a->set.wallpaper);
+    omni_client_rfill(c, x0 + 44, y + 28, 92, 54, 5, 0xffffff);
+    omni_client_fill(c, x0 + 44 + 5, y + 28 + 12, 82, 1, C_BORDER);
+    omni_client_rfill(c, x0 + 52, y + 48, 50, 5, 2, ac);
+    omni_client_rfill(c, x0 + 52, y + 59, 68, 4, 2, C_BORDER);
+    omni_client_fill(c, x0, y + 10 + 108 - 12, 180, 12, 0x0b1020);
+    for (i = 0; i < 4; i++) {                   /* taskbar icons */
+        int ix = (a->set.taskbar_left ? x0 + 6 : x0 + 90 - 17) + i * 9;
+        omni_client_rfill(c, ix, y + 10 + 108 - 9, 6, 6, 2, i == 1 ? ac : 0xcbd5e1);
+    }
+    omni_client_textt(c, x0 + 204, y + 26, C_DIM, "Background");
+    omni_client_text2(c, x0 + 204, y + 40, C_INK, omni_walls[a->set.wallpaper % omni_walls_n].name);
+    omni_client_textt(c, x0 + 204, y + 74, C_DIM, "Accent color");
+    omni_client_text2(c, x0 + 204, y + 88, C_INK, omni_accents[a->set.accent % omni_accents_n].name);
+    y += 140;
 
     card(a, y, 60 + th + 18);
     omni_client_textt(c, x0, y + 16, C_INK, "Background");
@@ -337,6 +416,24 @@ static void page_personal(struct app *a)
         omni_client_rfill(c, sx, sy, 30, 30, 15, omni_accents[i].rgb);
         add_zone(a, sx - 4, sy - 4, 38, 38, Z_ACCENT, i);
     }
+    y += 104;
+
+    /* taskbar: icons centred (Windows 11) or on the left; desktop icons */
+    card(a, y, 80);
+    omni_client_textt(c, x0, y + 17, C_INK, "Taskbar alignment");
+    for (i = 0; i < 2; i++) {                   /* [ Left ][ Center ] */
+        static const char *const names[2] = { "Left", "Center" };
+        int on = (i == 0) == (a->set.taskbar_left != 0), bx = x0 + cw - 36 - 168 + i * 84;
+        omni_client_rfill(c, bx, y + 8, 84, 26, 5, on ? ac : C_BTN_BD);
+        omni_client_rfill(c, bx + 1, y + 9, 82, 24, 4, on ? ac : C_BTN);
+        omni_client_textt(c, bx + (84 - (int)strlen(names[i]) * 8) / 2, y + 17,
+                          on ? 0xffffff : C_INK, names[i]);
+        add_zone(a, bx, y + 8, 84, 26, Z_ALIGN, i);
+    }
+    omni_client_fill(c, x0, y + 41, cw - 36, 1, C_BORDER);
+    omni_client_textt(c, x0, y + 55, C_INK, "Desktop icons");
+    omni_client_textt(c, x0 + 120, y + 55, C_DIM, "This PC, Terminal, App Store");
+    toggle(a, y + 48, a->set.desktop_icons, T_DESKICONS);
 }
 
 static void page_apps(struct app *a)
@@ -499,6 +596,17 @@ static void when_text(long t, char *out, size_t n)
         strftime(out, n, "%b %d, %Y", &b);
 }
 
+/* "Oct 1, 2026" */
+static void date_text(long t, char *out, size_t n)
+{
+    time_t tt = (time_t)t;
+    struct tm tmv;
+    char mon[16];
+    localtime_r(&tt, &tmv);
+    strftime(mon, sizeof(mon), "%b", &tmv);
+    snprintf(out, n, "%s %d, %d", mon, tmv.tm_mday, tmv.tm_year + 1900);
+}
+
 static void page_update(struct app *a)
 {
     struct omni_client_conn *c = &a->c;
@@ -506,10 +614,18 @@ static void page_update(struct app *a)
     const char *title, *btn = NULL;
     char sub[160], s[160], line[128];
     int y = 62, cw = card_w(a), act = B_UPD_CHECK, n = 0;
+    int paused = omni_updates_paused(&a->set);
     FILE *f;
 
     sub[0] = '\0';
-    switch (us->state) {
+    switch (paused && us->state != UPD_READY && us->state != UPD_DOWNLOADING ? -1 : us->state) {
+    case -1:                    /* like Windows: paused, with a way back */
+        title = "Updates paused";
+        date_text(a->set.pause_until, s, sizeof(s));
+        snprintf(sub, sizeof(sub), "Updates will resume on %s", s);
+        btn = "Resume updates";
+        act = B_UPD_RESUME;
+        break;
     case UPD_CHECKING:
         title = "Checking for updates...";
         snprintf(sub, sizeof(sub), "Looking for a newer OmniOS on GitHub");
@@ -575,39 +691,47 @@ static void page_update(struct app *a)
         button(a, CARD_X + cw - 18 - 160, y + 22, 160, btn, 1, act);
     y += 122;
 
+    if (paused) {
+        date_text(a->set.pause_until, s, sizeof(s));
+        snprintf(line, sizeof(line), "Paused until %s", s);
+    }
+    row_card(a, y, 64, "Pause updates", paused ? line : "Take a break from automatic updates");
+    if (!paused || a->set.pause_until + OMNI_PAUSE_STEP <= (long)time(NULL) + OMNI_PAUSE_MAX)
+        button(a, CARD_X + cw - 18 - 160, y + 17, 160,
+               paused ? "Pause 1 more week" : "Pause for 1 week", 0, B_UPD_PAUSE);
+    y += 76;
+
     row_card(a, y, 64, "Get updates automatically",
              "Download new versions in the background");
     toggle(a, y + 21, a->set.autoupdate, T_AUTOUPD);
     y += 76;
 
-    row_card(a, y, 52, "Current version", NULL);
-    snprintf(s, sizeof(s), "OmniOS %s", us->current[0] ? us->current : "(development build)");
-    right_text(a, y + 22, C_INK, s);
-    y += 64;
-
-    card(a, y, 132);
+    card(a, y, 112);
     omni_client_textt(c, CARD_X + 18, y + 16, C_INK, "Update history");
     snprintf(s, sizeof(s), "%s/history", omni_update_dir());
     if ((f = fopen(s, "r"))) {
-        char last[5][128];
+        char last[4][128];
         int k, total = 0;
         while (fgets(line, sizeof(line), f)) {
             line[strcspn(line, "\n")] = '\0';
-            snprintf(last[total % 5], sizeof(last[0]), "%s", line);
+            snprintf(last[total % 4], sizeof(last[0]), "%s", line);
             total++;
         }
         fclose(f);
-        n = total < 5 ? total : 5;
+        n = total < 4 ? total : 4;
         for (k = 0; k < n; k++)                 /* newest first */
             omni_client_textt(c, CARD_X + 18, y + 38 + k * 17, C_DIM,
-                              last[(total - 1 - k) % 5]);
+                              last[(total - 1 - k) % 4]);
     }
     if (n == 0)
         omni_client_textt(c, CARD_X + 18, y + 38, C_DIM, "No updates yet.");
-    y += 144;
-    omni_client_textt(c, CARD_X + 4, y, C_DIM,
+    y += 124;
+    snprintf(s, sizeof(s), "Current version: OmniOS %s",
+             us->current[0] ? us->current : "(development build)");
+    omni_client_textt(c, CARD_X + 4, y, C_INK, s);
+    omni_client_textt(c, CARD_X + 4, y + 16, C_DIM,
                       "Updates come from github.com/OmniNodeCo/OmniOS and are checked");
-    omni_client_textt(c, CARD_X + 4, y + 14, C_DIM,
+    omni_client_textt(c, CARD_X + 4, y + 30, C_DIM,
                       "against the SHA-256 checksum published with each release.");
 }
 
@@ -638,11 +762,13 @@ static void draw_nav(struct app *a)
 static void draw(struct app *a)
 {
     a->nz = 0;
+    omni_settings_load(&a->set);    /* Quick Settings may have changed it */
     draw_nav(a);
     omni_client_fill(&a->c, NAV_W, 0, a->w - NAV_W, a->h, C_BG);
     omni_client_text2(&a->c, CARD_X, 24, C_INK, g_pages[a->page].name);
     switch (a->page) {
     case PG_SYSTEM:   page_system(a); break;
+    case PG_NETWORK:  page_network(a); break;
     case PG_PERSONAL: page_personal(a); break;
     case PG_APPS:     page_apps(a); break;
     case PG_ACCOUNTS: page_accounts(a); break;
@@ -721,6 +847,8 @@ static void pw_save(struct app *a)
 
 static void activate(struct app *a, const struct zone *z, int dir)
 {
+    if (z->kind != Z_NAV && z->kind != Z_FIELD)
+        omni_settings_load(&a->set);    /* change today's settings, not a stale copy */
     switch (z->kind) {
     case Z_NAV:
         set_page(a, z->arg);
@@ -737,6 +865,11 @@ static void activate(struct app *a, const struct zone *z, int dir)
         if (z->arg == T_CLOCK24)  a->set.clock24 = !a->set.clock24;
         if (z->arg == T_AUTOUPD)  a->set.autoupdate = !a->set.autoupdate;
         if (z->arg == T_SIGNIN)   a->set.signin = !a->set.signin;
+        if (z->arg == T_DESKICONS) a->set.desktop_icons = !a->set.desktop_icons;
+        save(a);
+        break;
+    case Z_ALIGN:
+        a->set.taskbar_left = dir ? (dir < 0) : (z->arg == 0);
         save(a);
         break;
     case Z_ZPREV: case Z_ZNEXT:
@@ -777,6 +910,23 @@ static void activate(struct app *a, const struct zone *z, int dir)
         case B_UPD_RESTART:
             sync();
             kill(1, SIGQUIT);                   /* init restarts into the update */
+            break;
+        case B_UPD_PAUSE: {                     /* a week at a time, 5 at most */
+            long now = (long)time(NULL);
+            long from = a->set.pause_until > now ? a->set.pause_until : now;
+            a->set.pause_until = from + OMNI_PAUSE_STEP;
+            if (a->set.pause_until > now + OMNI_PAUSE_MAX)
+                a->set.pause_until = now + OMNI_PAUSE_MAX;
+            save(a);
+            omni_update_log("Updates paused");
+            break;
+        }
+        case B_UPD_RESUME:                      /* and check straight away */
+            a->set.pause_until = 0;
+            save(a);
+            omni_update_log("Updates resumed");
+            spawn(updater(), "check");
+            a->us.state = UPD_CHECKING;
             break;
         default: break;
         }
@@ -848,7 +998,7 @@ static int on_key(struct app *a, int key, char ch)
         break;
     case K_LEFT: case K_RIGHT:
         if (fz && (fz->kind == Z_WALL || fz->kind == Z_ACCENT || fz->kind == Z_ZPREV ||
-                   fz->kind == Z_ZNEXT))
+                   fz->kind == Z_ZNEXT || fz->kind == Z_ALIGN))
             activate(a, fz, key == K_LEFT ? -1 : 1);
         break;
     case K_ENTER: case K_KPENTER: case K_SPACE:
@@ -897,7 +1047,8 @@ int main(int argc, char **argv)
     while (!quit) {
         struct omni_client_event e;
         struct pollfd pf = { a->c.fd, POLLIN, 0 };
-        int timeout = (a->page == PG_TIME || a->page == PG_UPDATE) ? 1000 : -1;
+        int timeout = (a->page == PG_TIME || a->page == PG_UPDATE ||
+                       a->page == PG_NETWORK) ? 1000 : -1;
         int r, changed = 0;
 
         r = poll(&pf, 1, timeout);
