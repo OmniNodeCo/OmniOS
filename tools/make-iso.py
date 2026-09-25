@@ -50,6 +50,7 @@ ISOLINUX_BIN_PATHS = [
     "/usr/share/syslinux/bios/isolinux.bin",
 ]
 LDLINUX_C32_PATHS = [
+    "/usr/lib/syslinux/modules/bios/ldlinux.c32",    # Debian/Ubuntu syslinux-common
     "/usr/lib/ISOLINUX/ldlinux.c32",
     "/usr/lib/syslinux/ldlinux.c32",
     "/usr/lib/syslinux/bios/ldlinux.c32",
@@ -99,9 +100,15 @@ def main():
     if have_bios:
         shutil.copy(isolinux_bin, os.path.join(stage, "isolinux", "isolinux.bin"))
         ldlinux = find_existing(LDLINUX_C32_PATHS)
-        if ldlinux:
-            # ISOLINUX 6.x loads its core module from the isolinux directory.
-            shutil.copy(ldlinux, os.path.join(stage, "isolinux", "ldlinux.c32"))
+        if not ldlinux:
+            # ISOLINUX 6.x loads its core module from the isolinux directory
+            # and stops with "Failed to load ldlinux.c32" without it: every
+            # BIOS boot would fail. (On Debian/Ubuntu it is in syslinux-
+            # common, which the isolinux package only recommends.)
+            print("make-iso: isolinux.bin found (%s) but not ldlinux.c32: "
+                  "install syslinux-common" % isolinux_bin, file=sys.stderr)
+            sys.exit(1)
+        shutil.copy(ldlinux, os.path.join(stage, "isolinux", "ldlinux.c32"))
         with open(os.path.join(stage, "isolinux", "isolinux.cfg"), "w") as f:
             f.write(
                 "DEFAULT omnios\n"
