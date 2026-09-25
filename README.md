@@ -293,6 +293,14 @@ BusyBox 1.36.1's TLS miscomputes P-256 keys on x86_64, and GitHub rejects
 the handshake. `patches/busybox-tls-p256.patch` carries the two upstream
 fixes (made after 1.36.1); `scripts/build.sh fetch` applies it.
 
+`wget` uses BusyBox's own TLS code only (`FEATURE_WGET_OPENSSL` off in
+`tools/config/busybox.config`). Its openssl helper first tries to run an
+`openssl` program, and OmniOS has none: the failed attempt damaged `wget`,
+which then crashed at the end of every HTTPS download. That is why
+releases 2026.2.2 to 2026.2.4 cannot update themselves (every check
+failed). Start 2026.2.5 or later from its ISO once; after that, updates
+arrive by themselves. The boot test fails if `wget` crashes in the VM.
+
 ## Kernel source (`os/kernel/src`)
 
 The Linux kernel's source is part of this repository: `os/kernel/src` is
