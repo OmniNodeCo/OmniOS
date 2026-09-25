@@ -599,14 +599,19 @@ class Boot:
         # download by hand: every redirect hop and wget's own words, so a
         # failure says why and where. wget gets a timeout (its default is
         # 15 minutes), and whatever arrived is kept if the end never comes.
+        # wget's words go to a file, not a pipe: its TLS helper process can
+        # outlive it, and would keep a pipe (and the shell) waiting.
         start = serial.size()
         serial.send("echo __OMNI_\"UPD\"__; cat /etc/resolv.conf; t=$(date +%s); "
                     "omnios-update check; echo check-exit=$? after $(( $(date +%s) - t )) s; "
                     "omnios-update status; "
                     "u=$(sed -n 's/^url=//p' /etc/omnios-update.conf); echo url=$u; "
-                    "{ busybox wget -S -T 20 -O /tmp/feed.txt \"$u\" 2>&1; echo wget-exit=$?; } | "
-                    "grep -E '^Connecting|HTTP/1|wget' | cut -c1-150; "
-                    "head -c 400 /tmp/feed.txt; echo; echo __OMNI_\"END3\"__\n")
+                    "busybox wget -S -T 20 -O /tmp/feed.txt \"$u\" 2>/tmp/wget.err; "
+                    "echo wget-exit=$?; grep -E '^Connecting|HTTP/1|wget' /tmp/wget.err | cut -c1-150; "
+                    "head -c 400 /tmp/feed.txt; echo; "
+                    "busybox wget -T 20 -O /dev/null https://api.github.com/ 2>/tmp/wget2.err; "
+                    "echo api.github.com-exit=$?; grep wget /tmp/wget2.err | cut -c1-150; "
+                    "echo __OMNI_\"END3\"__\n")
         out = serial.wait_for(r"__OMNI_END3__", start, 150.0)
         ended = out is not None
         if not ended:
