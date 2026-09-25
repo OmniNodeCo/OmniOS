@@ -624,6 +624,13 @@ class Boot:
         if not ended:
             lines.append("(unfinished after 150 s)")
         self.result["update_check"] = "\n".join(lines[-30:])
+        # wget killed by a signal (exit 128+N) is a bug in OmniOS, not the
+        # network's doing: the run fails. A check that fails is a warning.
+        exits = [int(x) for x in re.findall(r"(?:wget|api\.github\.com)-exit=(\d+)", text)]
+        self.result["wget_crashed"] = any(x >= 128 for x in exits)
+        m = re.search(r"check-exit=(\d+)", text)
+        if m:
+            self.result["update_check_exit"] = int(m.group(1))
 
 
 def find_ovmf():
@@ -824,6 +831,14 @@ def main():
                     lines.append("uptime at dump %.2f" % r["uptime_at_dump"])
                 lines += k.get("excerpt", [])
                 print("::notice title=Kernel %s::%s" % (r["variant"], gh_escape("\n".join(lines))))
+            if r.get("wget_crashed"):
+                print("::error title=wget crashed in %s [%s] run %d::%s" % (
+                    r["variant"], r.get("build", "this"), r["run"],
+                    gh_escape(r.get("update_check", ""))))
+            elif r.get("update_check_exit"):
+                print("::warning title=OmniOS Update's check failed in %s [%s] run %d::%s" % (
+                    r["variant"], r.get("build", "this"), r["run"],
+                    gh_escape(r.get("update_check", ""))))
             if r.get("error"):
                 print("::warning title=Boot %s [%s] run %d::%s%%0A%s" % (
                     r["variant"], r.get("build", "this"), r["run"], gh_escape(r["error"]),
@@ -850,6 +865,7 @@ def main():
     first = [r for r in results if r["variant"] == variants[0] and r.get("build", "this") == "this"]
     ok = first and all(r.get("desktop") is not None for r in first)
     ok = ok and all(r["update"].get("result") == "ok" for r in results if r.get("update"))
+    ok = ok and not any(r.get("wget_crashed") for r in results if r.get("build", "this") == "this")
     return 0 if ok else 1
 
 
