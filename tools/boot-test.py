@@ -595,22 +595,29 @@ class Boot:
         z = re.search(r"zombies=(\d+)", text)
         if z:
             self.result["zombies"] = int(z.group(1))
-        # OmniOS Update's own check, then its download by hand (wget's own
-        # words), so a failure says why
+        # OmniOS Update's own check (and how long it took), then its
+        # download by hand: every redirect hop and wget's own words, so a
+        # failure says why and where. wget gets a timeout (its default is
+        # 15 minutes), and whatever arrived is kept if the end never comes.
         start = serial.size()
-        serial.send("echo __OMNI_\"UPD\"__; cat /etc/resolv.conf; omnios-update check; "
-                    "echo check-exit=$?; omnios-update status; "
+        serial.send("echo __OMNI_\"UPD\"__; cat /etc/resolv.conf; t=$(date +%s); "
+                    "omnios-update check; echo check-exit=$? after $(( $(date +%s) - t )) s; "
+                    "omnios-update status; "
                     "u=$(sed -n 's/^url=//p' /etc/omnios-update.conf); echo url=$u; "
-                    "busybox wget -O /tmp/feed.txt \"$u\" 2>&1 | tail -4; echo wget-exit=$?; "
-                    "cat /tmp/feed.txt; echo __OMNI_\"END3\"__\n")
-        out = serial.wait_for(r"__OMNI_END3__", start, 120.0)
-        if out is None:
-            self.result["update_check"] = "no answer within 120 s"
-            return
+                    "{ busybox wget -S -T 20 -O /tmp/feed.txt \"$u\" 2>&1; echo wget-exit=$?; } | "
+                    "grep -E '^Connecting|HTTP/1|wget' | cut -c1-150; "
+                    "head -c 400 /tmp/feed.txt; echo; echo __OMNI_\"END3\"__\n")
+        out = serial.wait_for(r"__OMNI_END3__", start, 150.0)
+        ended = out is not None
+        if not ended:
+            with serial.lock:
+                out = bytes(serial.data[start:])
         text = out.decode("utf-8", "replace").replace("\r", "")
         text = text.split("__OMNI_UPD__", 1)[-1].rsplit("__OMNI_END3__", 1)[0]
         lines = [ln.strip() for ln in text.split("\n")
                  if ln.strip() and "__OMNI_" not in ln and not ln.startswith("omnios-serial#")]
+        if not ended:
+            lines.append("(unfinished after 150 s)")
         self.result["update_check"] = "\n".join(lines[-30:])
 
 
