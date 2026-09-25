@@ -134,9 +134,13 @@ def main():
     # ---- EFI System Partition FAT image --------------------------------------
     esp = os.path.join(stage, "efi.img")
     if had("mcopy") and had("mformat"):            # mtools route
+        # just big enough for the kernel (FAT12/16 as mformat picks: UEFI
+        # reads them all); it was a fixed 48 MB, most of the ISO
+        mib = 1024 * 1024
+        size = (os.path.getsize(ksrc) + 2 * mib + mib - 1) // mib * mib
         with open(esp, "wb") as f:
-            f.truncate(48 * 1024 * 1024)
-        subprocess.run(["mformat", "-i", esp, "-F", "::"], check=True)
+            f.truncate(size)
+        subprocess.run(["mformat", "-i", esp, "::"], check=True)
         subprocess.run(["mmd", "-i", esp, "::EFI"], check=True)
         subprocess.run(["mmd", "-i", esp, "::EFI/BOOT"], check=True)
         subprocess.run(["mcopy", "-i", esp,

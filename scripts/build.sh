@@ -206,9 +206,15 @@ stage_kernel() {
         # Embed the assembled rootfs as the initramfs, uncompressed: the
         # whole kernel image is compressed (zstd, override.config) anyway,
         # and compressing the initramfs inside it as well only adds a
-        # second pass to unpack at boot.
+        # second pass to unpack at boot. The list adds /dev/console (a
+        # device node make-rootfs.py cannot create without root): without
+        # it the kernel prints "unable to open an initial console" on the
+        # screen. Files owned by the building user become root's.
+        printf 'nod /dev/console 0600 0 0 c 5 1\n' > "$BLD/initramfs-extra.list"
         ./scripts/config --file .config \
-            --set-str INITRAMFS_SOURCE "$BLD/rootfs" \
+            --set-str INITRAMFS_SOURCE "$BLD/rootfs $BLD/initramfs-extra.list" \
+            --set-val INITRAMFS_ROOT_UID -1 \
+            --set-val INITRAMFS_ROOT_GID -1 \
             --disable INITRAMFS_COMPRESSION_GZIP \
             --enable INITRAMFS_COMPRESSION_NONE
         make ARCH=x86_64 olddefconfig >/dev/null
