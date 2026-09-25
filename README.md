@@ -220,23 +220,26 @@ boots the latest release alternately on the same runner, for comparison
 screenshots and logs are the `omnios-boot-test` artifact. A
 `workflow_dispatch` with a `release` tag boot-tests that release instead.
 
-Power-on to lock screen, 2026.2.3 against the changes since, booted
-alternately on one runner (QEMU/KVM):
+Power-on to lock screen, 2026.2.3 against 2026.2.4, booted alternately on
+one runner (QEMU/KVM; other runners came out within a few tenths of a
+second of this):
 
-| boot | 2026.2.3 | since |
+| boot | 2026.2.3 | 2026.2.4 |
 |---|---|---|
-| UEFI, IDE CD-ROM, e1000 (the older `.vmx`) | 4.72 s | 3.34 s |
-| UEFI, SATA CD-ROM, e1000 | 3.50 s | 2.57 s |
-| BIOS (ISOLINUX) | did not start | 1.42 s |
+| UEFI, SATA CD-ROM, vmxnet3 (the `.vmx`) | 3.36 s | 2.63 s |
+| UEFI, IDE CD-ROM, e1000 (older `.vmx` files) | 4.35 s | 3.35 s |
+| BIOS (ISOLINUX) | did not start | 1.55 s |
 
 Where it came from: the kernel no longer prints its ~700 boot messages
 (`quiet`: 0.66 s), the kernel image went from 13.2 MB to 8.1 MB (zstd, the
 initramfs not compressed twice, no Nano-X, none of the defconfig's unused
 drivers), so firmware loads it sooner, and the slowest drivers probe on
-the second CPU: kernel start to `/init` went from 1.22 s to 0.47 s, and
-`/init` to the desktop's first frame takes 0.07 s. What is left in the
-kernel is mostly e1000 reading its EEPROM (0.37 s), which is why the
-`.vmx` now uses vmxnet3.
+the second CPU: kernel start to `/init` went from about 1.2 s to about
+0.5 s, and `/init` to the desktop's first frame takes 0.06 s. With e1000
+the kernel waits while the adapter's EEPROM is read bit by bit (0.37 s in
+one run), one reason the `.vmx` now uses vmxnet3; a SATA CD-ROM also let
+the firmware start the kernel 0.78 s sooner than an IDE one. The ISO is
+27 MB (it was 77.6 MB, mostly a fixed 48 MB EFI System Partition image).
 - **USB stick**: the CI-built ISO is hybrid, so
   `dd if=OmniOS-<version>-amd64.iso of=/dev/sdX bs=16M oflag=direct
   status=progress` yields a directly bootable drive on both firmware types.
