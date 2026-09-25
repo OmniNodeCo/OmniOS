@@ -220,7 +220,14 @@ stage_kernel() {
         for opt in KERNEL_ZSTD INITRAMFS_COMPRESSION_NONE; do
             grep -q "^CONFIG_$opt=y" .config || warn "  kernel: CONFIG_$opt is off"
         done
-        grep -q '^CONFIG_CMDLINE=".* quiet"' .config || warn "  kernel: the command line is not quiet"
+        grep -q '^CONFIG_CMDLINE=".* quiet[ "]' .config || warn "  kernel: the command line is not quiet"
+        # OmniOS Update strips the built-in command line from /proc/cmdline
+        # before handing the rest to an update's kernel: its copy must match
+        want=$(sed -n 's/^CONFIG_CMDLINE="\(.*\)"$/\1/p' .config)
+        have=$(sed -n '/^#define BUILTIN_CMDLINE/,/[^\\]$/p' "$ROOT/os/apps/update.c" |
+               grep -o '"[^"]*"' | tr -d '"\n')
+        [ "$want" = "$have" ] ||
+            warn "  kernel: CONFIG_CMDLINE differs from BUILTIN_CMDLINE in os/apps/update.c"
         make -j"$JOBS" bzImage
     )
     # collect the monolithic EFI-stub kernel
