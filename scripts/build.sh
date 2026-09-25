@@ -150,6 +150,13 @@ stage_busybox() {
     # Record the resolved config for inspection/reproducibility.
     mkdir -p "$BLD"
     cp "$bbcfg" "$BLD/busybox.config.resolved"
+    # OmniOS Update downloads with wget over HTTPS: BusyBox's own TLS, and
+    # not the openssl helper, which crashes wget when there is no openssl
+    grep -q '^CONFIG_FEATURE_WGET_HTTPS=y' "$bbcfg" ||
+        warn "  busybox: CONFIG_FEATURE_WGET_HTTPS is off: no HTTPS downloads"
+    if grep -q '^CONFIG_FEATURE_WGET_OPENSSL=y' "$bbcfg"; then
+        warn "  busybox: CONFIG_FEATURE_WGET_OPENSSL is on: wget crashes after HTTPS downloads"
+    fi
     make -C "$SRC/busybox" -j"$JOBS" \
         CC="$SIM/usr/bin/musl-gcc" \
         CONFIG_STATIC=y
