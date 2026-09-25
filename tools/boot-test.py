@@ -631,6 +631,44 @@ class Boot:
         m = re.search(r"check-exit=(\d+)", text)
         if m:
             self.result["update_check_exit"] = int(m.group(1))
+        said = re.search(r"state \d+, latest [^,]*, \d+%: (.*)", text)
+        check_said = said.group(1).strip() if said else "no answer"
+
+        # ...and the rest of the way. As an old version, the check finds the
+        # latest release newer, downloads its kernel, checks the size and
+        # SHA-256 and loads it with kexec: state 5, ready to restart (the
+        # test doesn't restart). Its own directory: the daemon's is untouched.
+        start = serial.size()
+        serial.send("echo __OMNI_\"DL\"__; echo 'OmniOS 2026.1.0' > /tmp/old-release; "
+                    "mkdir -p /tmp/upd; export OMNI_RELEASE_FILE=/tmp/old-release "
+                    "OMNI_UPDATE_DIR=/tmp/upd; t=$(date +%s); omnios-update check; "
+                    "echo dl-exit=$? after $(( $(date +%s) - t )) s; omnios-update status; "
+                    "ls -l /tmp/upd | cut -c1-120; "
+                    "echo kexec-loaded=$(cat /sys/kernel/kexec_loaded 2>/dev/null); "
+                    "unset OMNI_RELEASE_FILE OMNI_UPDATE_DIR; echo __OMNI_\"END4\"__\n")
+        out = serial.wait_for(r"__OMNI_END4__", start, 150.0)
+        ended = out is not None
+        if not ended:
+            with serial.lock:
+                out = bytes(serial.data[start:])
+        text = out.decode("utf-8", "replace").replace("\r", "")
+        text = text.split("__OMNI_DL__", 1)[-1].rsplit("__OMNI_END4__", 1)[0]
+        lines = [ln.strip() for ln in text.split("\n")
+                 if ln.strip() and "__OMNI_" not in ln and not ln.startswith("omnios-serial#")]
+        if not ended:
+            lines.append("(unfinished after 150 s)")
+        self.result["update_download"] = "\n".join(lines[-15:])
+        m = re.search(r"dl-exit=(\d+)", text)
+        st = re.search(r"state (\d+), latest [^,]*, \d+%: (.*)", text)
+        kx = re.search(r"kexec-loaded=(\d)", text)
+        self.result["update_download_ok"] = bool(m and m.group(1) == "0" and st and st.group(1) == "5")
+        if self.result["update_download_ok"]:
+            dl_said = "downloaded, verified%s" % (
+                " and loaded with kexec" if kx and kx.group(1) == "1" else " (kexec not loaded)")
+        else:
+            dl_said = st.group(2).strip() if st else "no answer"
+        self.result["update_summary"] = "update check: %s; update download (as 2026.1.0): %s" % (
+            check_said, dl_said)
 
 
 def find_ovmf():
@@ -801,6 +839,10 @@ def main():
         if sizes:
             print("::notice title=Sizes::%s" % ", ".join("%s %d bytes" % s_ for s_ in sizes))
         for variant, msg in notes:
+            upd = [r["update_summary"] for r in results if r["variant"] == variant
+                   and r.get("build", "this") == "this" and r.get("update_summary")]
+            if upd:
+                msg += "\n" + upd[0]
             print("::notice title=Boot %s::%s" % (variant, gh_escape(msg)))
         for r in results:
             if r.get("update"):
@@ -823,6 +865,9 @@ def main():
                 if r.get("update_check"):
                     lines.append("update check:")
                     lines += ["  " + ln for ln in r["update_check"].split("\n")]
+                if r.get("update_download"):
+                    lines.append("update download (as 2026.1.0):")
+                    lines += ["  " + ln for ln in r["update_download"].split("\n")]
                 lines += ["pause %.3f s after [%.3f] %s -> %s" % (g[0], g[1], g[2], g[3])
                           for g in k.get("gaps", [])[:6]]
                 lines += ["initcall %.1f ms %s" % (us / 1000.0, n)
@@ -839,6 +884,10 @@ def main():
                 print("::warning title=OmniOS Update's check failed in %s [%s] run %d::%s" % (
                     r["variant"], r.get("build", "this"), r["run"],
                     gh_escape(r.get("update_check", ""))))
+            elif r.get("update_download") and not r.get("update_download_ok"):
+                print("::warning title=OmniOS Update's download failed in %s [%s] run %d::%s" % (
+                    r["variant"], r.get("build", "this"), r["run"],
+                    gh_escape(r.get("update_download", ""))))
             if r.get("error"):
                 print("::warning title=Boot %s [%s] run %d::%s%%0A%s" % (
                     r["variant"], r.get("build", "this"), r["run"], gh_escape(r["error"]),
