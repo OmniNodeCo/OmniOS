@@ -53,9 +53,10 @@ tools/config/override.config       project kernel options (merged over defconfig
 tools/make-rootfs.py               assembles build/rootfs (the OS itself)
 tools/make-iso.py                  assembles the hybrid BIOS+UEFI ISO + .vmx
 tools/make-fat.py                  pure-Python FAT image builder for the EFI System Partition
+tools/boot-test.py                 boots the ISO in QEMU/KVM, times it, screenshots (CI)
 tools/config/busybox.config        BusyBox build config
 patches/kernel-omnios.patch        the 3 kernel-tree edits, for reproducibility
-.github/workflows/build.yml        CI: builds kernel + ISO (ccache + prebuilt-userspace caches)
+.github/workflows/build.yml        CI: builds kernel + ISO (ccache + prebuilt-userspace caches), boot test
 .github/workflows/release.yml      publishes the ISO as a GitHub release
 .github/workflows/ci.yml           static checks (py_compile, shellcheck, C syntax)
 src/                               upstream source checkouts (git-cloned; not committed)
@@ -69,11 +70,14 @@ The runtime system is assembled by `tools/make-rootfs.py` into an initramfs
 so the whole OS is compiled into the single static `bzImage`:
 
 ```
-/init                    first process: mount, seed /dev, exec /sbin/init
-/usr/bin/ominit          (as /sbin/init) the from-scratch PID 1
+/init, /sbin/init        -> /usr/bin/ominit, the from-scratch PID 1: mounts
+                         /proc, /sys, /dev, starts the desktop, the network
+                         and OmniOS Update, reaps orphans
 /usr/bin/omnios-desktop  the desktop shell (owns the framebuffer)
-/sbin/getty, /bin/login  console login (BusyBox)
-/etc/inittab, /etc/init.d/rcS, /etc/profile
+/usr/bin/omnios-*        the apps and OmniOS Update
+/etc/init.d/network      DHCP on every wired adapter (BusyBox udhcpc)
+/bin/*                   BusyBox: ash (the Terminal's shell), wget, tools
+/etc/profile             the Terminal's shell environment
 ```
 
 ## The OS source tree (`os/`)
@@ -184,12 +188,55 @@ The ready-to-boot artifacts land in `build/out/`:
 - **UEFI firmware**: the kernel is executed directly from
   `/EFI/BOOT/BOOTX64.EFI` (no bootloader).
 - **BIOS firmware** (e.g. VMware "BIOS" mode): ISOLINUX loads
-  `/boot/omnios-bzImage` per the Linux boot protocol. The
+  `/boot/omnios-bzImage` per the Linux boot protocol. It needs
+  `ldlinux.c32` beside `isolinux.bin` (Debian/Ubuntu: `syslinux-common`);
+  `make-iso.py` refuses to build an ISO without it, since BIOS boots cannot
+  work then (releases up to 2026.2.3 had this problem). The
   `"Operating system not found"` message appears only when the ISO lacks the
   ISOLINUX catalogue — i.e. when it was built without `xorriso`/`isolinux`.
 - **VMware**: drop `OmniOS-<version>-amd64.iso` and the `.vmx` in the same
-  folder and open the `.vmx`. It boots with UEFI firmware and logs the serial
-  console to `omnios-serial.log`; set `firmware = "bios"` to boot legacy.
+  folder and open the `.vmx`. It boots with UEFI firmware from a SATA
+  CD-ROM, with a vmxnet3 network adapter, and logs the serial console to
+  `omnios-serial.log`; set `firmware = "bios"` to boot legacy.
+- The kernel's command line is built in (`CONFIG_CMDLINE`, the same for
+  both firmware types): the consoles, `quiet` (only errors while the
+  kernel starts; OmniOS turns the log level back up once it runs) and
+  `driver_async_probe` for the slowest drivers.
+
+### Boot test
+
+`tools/boot-test.py` boots the ISO in QEMU with KVM, on hardware close to
+the VMware VM (UEFI firmware, CD-ROM, network adapter, PS/2 keyboard and
+VMware mouse, 1 GB, 2 CPUs), and times how long it takes until the desktop
+(the lock screen) is on the screen. Then it presses a key, signs in, opens
+Start and Quick Settings, with a screenshot of each. With
+`omnios.serialshell` on the kernel command line OmniOS opens a root shell
+on the serial port, through which the test reads the kernel log (initcall
+times), checks the DHCP lease and looks for zombie processes.
+
+The "Boot test (QEMU)" job in `build.yml` runs it after every build and
+boots the latest release alternately on the same runner, for comparison
+(runners differ too much between runs to compare separate runs). The
+screenshots and logs are the `omnios-boot-test` artifact. A
+`workflow_dispatch` with a `release` tag boot-tests that release instead.
+
+Power-on to lock screen, 2026.2.3 against the changes since, booted
+alternately on one runner (QEMU/KVM):
+
+| boot | 2026.2.3 | since |
+|---|---|---|
+| UEFI, IDE CD-ROM, e1000 (the older `.vmx`) | 4.72 s | 3.34 s |
+| UEFI, SATA CD-ROM, e1000 | 3.50 s | 2.57 s |
+| BIOS (ISOLINUX) | did not start | 1.42 s |
+
+Where it came from: the kernel no longer prints its ~700 boot messages
+(`quiet`: 0.66 s), the kernel image went from 13.2 MB to 8.1 MB (zstd, the
+initramfs not compressed twice, no Nano-X, none of the defconfig's unused
+drivers), so firmware loads it sooner, and the slowest drivers probe on
+the second CPU: kernel start to `/init` went from 1.22 s to 0.47 s, and
+`/init` to the desktop's first frame takes 0.07 s. What is left in the
+kernel is mostly e1000 reading its EEPROM (0.37 s), which is why the
+`.vmx` now uses vmxnet3.
 - **USB stick**: the CI-built ISO is hybrid, so
   `dd if=OmniOS-<version>-amd64.iso of=/dev/sdX bs=16M oflag=direct
   status=progress` yields a directly bootable drive on both firmware types.
@@ -265,6 +312,9 @@ Three minimal, justified edits (see `patches/kernel-omnios.patch`):
 - root filesystem assembles completely
 - ISO tooling produces a hybrid BIOS+UEFI image (CI) plus a VMware `.vmx`;
   a UEFI-only fallback exists on hosts without xorriso/isolinux
+
+- boots to the desktop in QEMU/KVM on UEFI and BIOS firmware, signs in,
+  opens Start and Quick Settings (the boot test, after every CI build)
 
 Next: boot `OmniOS-<version>-amd64.iso` in VMware (UEFI, via the bundled
 `.vmx`) and verify the desktop shell starts on the framebuffer, the network
