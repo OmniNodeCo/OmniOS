@@ -1,9 +1,11 @@
-# live-build workspace and package cache
-build/
-.cache/
+# build outputs and package cache (anchored: the kernel source in
+# os/kernel/src has directories named build and src of its own)
+/build/
+/.cache/
 
-# Upstream source checkouts (git-cloned; see README "Build")
-src/
+# Upstream source checkouts (git-cloned; see README "Build"). The Linux
+# kernel is not one of them: its source is in os/kernel/src.
+/src/
 
 # C objects left by the os/ build (built in-tree, installed into build/)
 *.o
