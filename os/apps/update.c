@@ -367,6 +367,51 @@ static void explain(const char *err, char *msg, size_t n)
         snprintf(msg, n, "Download failed.");
 }
 
+/* read what's there from fd into buf, keeping the newest output when it
+ * doesn't fit: wget's last lines say what went wrong */
+static void read_tail(int fd, char *buf, size_t *len, size_t cap)
+{
+    for (;;) {
+        ssize_t r;
+        if (*len >= cap - 1) {
+            size_t keep = (cap - 1) / 2;
+            memmove(buf, buf + *len - keep, keep);
+            *len = keep;
+        }
+        r = read(fd, buf + *len, cap - 1 - *len);
+        if (r <= 0)
+            break;
+        *len += (size_t)r;
+    }
+    buf[*len] = '\0';
+}
+
+/* wget's last word, in place: its last line that isn't a note (BusyBox
+ * wget always notes first that it doesn't check TLS certificates, which
+ * isn't what went wrong), without the "wget: " in front */
+static void last_error_line(char *err)
+{
+    char *line = err, *best = NULL;
+    while (line && *line) {
+        char *nl = strchr(line, '\n');
+        const char *t = line;
+        if (nl)
+            *nl = '\0';
+        if (strncmp(t, "wget: ", 6) == 0)
+            t += 6;
+        if (*t && strncmp(t, "note:", 5) != 0)
+            best = line;
+        line = nl ? nl + 1 : NULL;
+    }
+    if (!best) {
+        err[0] = '\0';
+        return;
+    }
+    if (strncmp(best, "wget: ", 6) == 0)
+        best += 6;
+    memmove(err, best, strlen(best) + 1);
+}
+
 /* fetch url into path; while it runs, report progress against expect
  * bytes (0 = don't). Returns 0 ok, 1 not found (404), -1 error (msg). */
 static int fetch(const char *url, const char *path, long expect, char *msg, size_t n)
@@ -404,12 +449,8 @@ static int fetch(const char *url, const char *path, long expect, char *msg, size
     close(pfd[1]);
     fcntl(pfd[0], F_SETFL, O_NONBLOCK);
     for (;;) {
-        ssize_t r;
         pid_t w;
-        while (elen < sizeof(err) - 1 &&
-               (r = read(pfd[0], err + elen, sizeof(err) - 1 - elen)) > 0)
-            elen += (size_t)r;
-        err[elen] = '\0';
+        read_tail(pfd[0], err, &elen, sizeof(err));
         w = waitpid(pid, &status, WNOHANG);
         if (w == pid)
             break;
@@ -435,24 +476,22 @@ static int fetch(const char *url, const char *path, long expect, char *msg, size
         }
         usleep(250000);
     }
-    {
-        ssize_t r;                      /* what wget said last */
-        while (elen < sizeof(err) - 1 &&
-               (r = read(pfd[0], err + elen, sizeof(err) - 1 - elen)) > 0)
-            elen += (size_t)r;
-        err[elen] = '\0';
-    }
+    read_tail(pfd[0], err, &elen, sizeof(err));   /* what wget said last */
     close(pfd[0]);
     if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
         return 0;
     unlink(path);
     if (strstr(err, " 404"))
         return 1;
+    if (WIFSIGNALED(status)) {
+        /* not the network's fault: say so, rather than guess from its words */
+        snprintf(msg, n, "The download stopped unexpectedly (wget: %s). We'll try again later.",
+                 strsignal(WTERMSIG(status)));
+        return -1;
+    }
     if (WIFEXITED(status) && WEXITSTATUS(status) == 127 && !err[0])
         snprintf(err, sizeof(err), "wget is missing");
-    err[strcspn(err, "\n")] = '\0';
-    if (strncmp(err, "wget: ", 6) == 0)
-        memmove(err, err + 6, strlen(err + 6) + 1);
+    last_error_line(err);
     explain(err, msg, n);
     return -1;
 }
