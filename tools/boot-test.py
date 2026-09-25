@@ -20,6 +20,12 @@ Each --variant is one way to boot, and every variant boots --repeat times:
     kernel-efi[:ARGS]    the kernel started by the firmware directly, with
                          ARGS added to its built-in command line, e.g.
                          kernel-efi:quiet or kernel-efi:loglevel=7
+    update               the ISO on UEFI firmware, then OmniOS Update: the
+                         test signs in, waits --update-wait seconds for
+                         OmniOS Update to find, download and prepare the
+                         latest release (from GitHub, through QEMU's NAT),
+                         restarts from the Win+X menu and checks that the
+                         newer version comes up (boot an older release)
 with options after the mode, joined with "+": sata (the CD-ROM on SATA
 instead of IDE), vmxnet3 or e1000e (the network adapter; e1000 otherwise).
 iso-efi+sata+vmxnet3 is the machine the current .vmx describes.
@@ -331,6 +337,8 @@ class Boot:
                "-serial", "chardev:ser0",
                "-netdev", "user,id=n0",
                "-device", "%s,netdev=n0,romfile=" % nic]
+        if mode == "update":
+            mode = "iso-efi"
         if mode in ("iso-efi", "kernel-efi"):
             code, vars_ = find_ovmf()
             vcopy = os.path.join(self.tmp, "OVMF_VARS.fd")
@@ -411,7 +419,9 @@ class Boot:
             else:
                 time.sleep(1.5)                  # let the lock screen settle
                 self.shot(qmp, "1-lock")
-                if interact:
+                if self.variant.startswith("update"):
+                    self.update_flow(qmp, serial, proc, t0)
+                elif interact:
                     self.interact(qmp)
             if serial is not None:
                 self.serial_shell(serial)
@@ -470,6 +480,72 @@ class Boot:
         self.shot(qmp, "5-quicksettings")
         qmp.key("esc")
         time.sleep(0.4)
+
+    # OmniOS Update, end to end: the running version finds the latest
+    # release, downloads and prepares it, and a restart starts it (kexec)
+    def update_flow(self, qmp, serial, proc, t0):
+        up = {"result": "?"}
+        self.result["update"] = up
+        motd = re.compile(rb"OmniOS (\d[\w.]*) \S+ a lightweight OS")
+        m = motd.search(bytes(serial.data))
+        up["old"] = m.group(1).decode() if m else None
+        qmp.key("spc")                           # lock screen -> sign in
+        time.sleep(1.2)
+        qmp.key("ret")                           # no password
+        time.sleep(2.0)
+        self.shot(qmp, "u1-desktop")
+        # it checks 60 s after the network is up; downloading the kernel
+        # image and loading it for the restart take a few seconds more
+        time.sleep(self.args.update_wait)
+        self.shot(qmp, "u2-waited")
+        qmp.key("meta_l", "x")                   # quick links
+        time.sleep(1.0)
+        qmp.key("up")                            # ... Restart, Shut down:
+        time.sleep(0.25)                         # two up from the start
+        qmp.key("up")
+        time.sleep(0.5)
+        self.shot(qmp, "u3-restart")
+        mark = serial.size()
+        t_restart = time.time()
+        qmp.key("ret")
+        deadline = time.time() + 90
+        new = None
+        while time.time() < deadline:
+            if proc.poll() is not None:          # -no-reboot: a firmware restart
+                up["result"] = ("the machine restarted through the firmware: "
+                                "no update was installed")
+                return
+            with serial.lock:
+                m = motd.search(bytes(serial.data), mark)
+            if m:
+                new = m.group(1).decode()
+                break
+            time.sleep(0.2)
+        if new is None:
+            up["result"] = "no OmniOS came back within 90 s of the restart"
+            return
+        up["new"] = new
+        up["restart_to_kernel"] = round(time.time() - t_restart, 2)
+        ppm = os.path.join(self.tmp, "upd.ppm")
+        while time.time() < deadline:
+            try:
+                qmp.cmd("screendump", filename=ppm)
+                w, h, px = read_ppm(ppm)
+                black, mean = screen_stats(w, h, px)
+                if black <= DESKTOP_BLACK and mean > 12:
+                    up["restart_to_desktop"] = round(time.time() - t_restart, 2)
+                    break
+            except (RuntimeError, ValueError, OSError):
+                pass
+            time.sleep(POLL)
+        time.sleep(1.5)
+        self.shot(qmp, "u4-after")
+        if new == up["old"]:
+            up["result"] = "the same version came back (%s)" % new
+        elif "restart_to_desktop" not in up:
+            up["result"] = "%s started, but no desktop appeared" % new
+        else:
+            up["result"] = "ok"
 
     # OmniOS started with omnios.serialshell: read the kernel log through it
     def serial_shell(self, serial):
@@ -637,6 +713,8 @@ def main():
     ap.add_argument("--qemu", default="qemu-system-x86_64")
     ap.add_argument("--out", default="build/boot-test")
     ap.add_argument("--no-interact", action="store_true")
+    ap.add_argument("--update-wait", type=int, default=100,
+                    help="seconds the update variant waits after signing in")
     ap.add_argument("--print-thumbs", default="",
                     help="print small JPEGs of these screenshots (comma-separated "
                          "labels, e.g. 3-desktop,4-start) as base64, for logs")
@@ -688,6 +766,14 @@ def main():
             print("::notice title=Sizes::%s" % ", ".join("%s %d bytes" % s_ for s_ in sizes))
         for variant, msg in notes:
             print("::notice title=Boot %s::%s" % (variant, gh_escape(msg)))
+        for r in results:
+            if r.get("update"):
+                u = r["update"]
+                print("::%s title=OmniOS Update run %d::%s" % (
+                    "notice" if u.get("result") == "ok" else "warning", r["run"],
+                    gh_escape("%s: %s -> %s, restart to kernel %s, to desktop %s" % (
+                        u.get("result"), u.get("old"), u.get("new"),
+                        fmt(u.get("restart_to_kernel")), fmt(u.get("restart_to_desktop"))))))
         # the kernel timeline of each variant's first boot, for the record
         for r in results:
             k = r.get("kernel") or {}
@@ -730,7 +816,9 @@ def main():
                 print("===END===")
 
     first = [r for r in results if r["variant"] == variants[0] and r.get("build", "this") == "this"]
-    return 0 if first and all(r.get("desktop") is not None for r in first) else 1
+    ok = first and all(r.get("desktop") is not None for r in first)
+    ok = ok and all(r["update"].get("result") == "ok" for r in results if r.get("update"))
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
