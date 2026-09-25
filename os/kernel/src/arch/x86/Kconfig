@@ -261,7 +261,11 @@ config X86
 	select HAVE_NOINSTR_HACK		if HAVE_OBJTOOL
 	select HAVE_NMI
 	select HAVE_NOINSTR_VALIDATION		if HAVE_OBJTOOL
-	select HAVE_OBJTOOL			if X86_64
+	# OmniOS: HAVE_OBJTOOL left unselected. The build host has no libelf
+	# development headers (and no reachable elfutils mirror), so the in-tree
+	# objtool cannot be compiled. Every consumer of objtool is guarded by
+	# 'if HAVE_OBJTOOL', so they all fall back to their non-objtool paths.
+	# select HAVE_OBJTOOL			if X86_64
 	select HAVE_OPTPROBES
 	select HAVE_PAGE_SIZE_4KB
 	select HAVE_PCSPKR_PLATFORM

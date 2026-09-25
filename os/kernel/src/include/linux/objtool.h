@@ -167,6 +167,12 @@
 .endm
 .macro REACHABLE
 .endm
+/* OmniOS: when CONFIG_OBJTOOL is off, the UNRET validation annotations are
+ * still referenced by arch/x86/include/asm/unwind_hints.h but only objtool
+ * would ever consume their .discard.validate_unret sections, so make them
+ * no-ops (mirrors VALIDATE_UNRET_END in asm/nospec-branch.h). */
+.macro VALIDATE_UNRET_BEGIN
+.endm
 #endif
 
 #endif /* CONFIG_OBJTOOL */
