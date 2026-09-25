@@ -16,6 +16,7 @@ slower.
 
 Each --variant is one way to boot, and every variant boots --repeat times:
     iso-efi              the ISO on UEFI firmware (the .vmx's default)
+    iso-efi-sata         the same with the CD-ROM on SATA (AHCI), not IDE
     iso-bios             the ISO on BIOS firmware (ISOLINUX)
     kernel-efi[:ARGS]    the kernel started by the firmware directly, with
                          ARGS added to its built-in command line, e.g.
@@ -25,6 +26,10 @@ How "the desktop is on the screen" is told: the screen is captured every
 0.2 s, and the desktop (lock screen, wallpaper) is the first picture with
 almost no pure-black pixels. The firmware logo and the kernel's text
 console are mostly pure black.
+
+With --ref-iso (and --ref-kernel), every ISO boot is repeated with that
+build too, alternating, so both are timed on the same machine: runners
+differ too much from one run to the next to compare separate runs.
 
 The first boot of the first variant is also driven like a user would:
 a key on the lock screen, Enter to sign in (no password), the Windows key
@@ -59,7 +64,7 @@ OVMF_PAIRS = [
     ("/usr/share/edk2/x64/OVMF_CODE.4m.fd", "/usr/share/edk2/x64/OVMF_VARS.4m.fd"),
 ]
 
-POLL = 0.2              # seconds between screen captures
+POLL = 0.1              # seconds between screen captures
 DESKTOP_BLACK = 0.20    # at most this share of pure-black pixels: desktop
 
 
@@ -190,7 +195,7 @@ def read_ppm(path):
     return w, h, data[m.end():m.end() + w * h * 3]
 
 
-def screen_stats(w, h, px, step=7):
+def screen_stats(w, h, px, step=9):
     """share of pure-black pixels and mean brightness (0-255), sampled"""
     n = black = total = 0
     for y in range(0, h, step):
@@ -277,23 +282,31 @@ def kernel_timeline(lines):
             calls.append((int(m.group(2)), m.group(1)))
     calls.sort(reverse=True)
     last = stamped[-1][0] if stamped else None
+    rx = re.compile(r"drm|fbcon|Console:|e1000|vmwgfx|simple-framebuffer|"
+                    r"Freeing unused|Run /init|OmniOS init|desktop: (ready|framebuffer)")
+    excerpt = ["[%9.6f] %s" % (t, msg[:120]) for t, msg in stamped
+               if rx.search(msg) and not msg.startswith(("calling ", "initcall "))]
     return {"milestones": marks, "gaps": gaps[:12], "initcalls": calls[:25],
-            "last": last, "lines": len(stamped)}
+            "last": last, "lines": len(stamped), "excerpt": excerpt[:30]}
 
 
 # ---- one boot --------------------------------------------------------------------
 
 class Boot:
-    def __init__(self, args, variant, index, accel, outdir):
+    def __init__(self, args, variant, index, accel, outdir, build="this",
+                 iso=None, kernel=None):
         self.args = args
         self.variant = variant
         self.index = index
         self.accel = accel
-        self.name = "%s-%d" % (re.sub(r"[^A-Za-z0-9]+", "-", variant).strip("-"), index)
+        self.iso = iso or args.iso
+        self.kernel = kernel or args.kernel
+        self.name = "%s%s-%d" % ("" if build == "this" else "ref-",
+                                 re.sub(r"[^A-Za-z0-9]+", "-", variant).strip("-"), index)
         self.dir = os.path.join(outdir, self.name)
         os.makedirs(self.dir, exist_ok=True)
         self.tmp = tempfile.mkdtemp(prefix="omni-qemu-")
-        self.result = {"variant": variant, "run": index, "accel": accel,
+        self.result = {"variant": variant, "build": build, "run": index, "accel": accel,
                        "screens": [], "desktop": None}
 
     # the QEMU command line for this variant
@@ -314,19 +327,23 @@ class Boot:
                "-serial", "chardev:ser0",
                "-netdev", "user,id=n0",
                "-device", "e1000,netdev=n0,romfile="]
-        if mode in ("iso-efi", "kernel-efi"):
+        if mode in ("iso-efi", "iso-efi-sata", "kernel-efi"):
             code, vars_ = find_ovmf()
             vcopy = os.path.join(self.tmp, "OVMF_VARS.fd")
             shutil.copy(vars_, vcopy)
             cmd += ["-drive", "if=pflash,format=raw,unit=0,readonly=on,file=" + code,
                     "-drive", "if=pflash,format=raw,unit=1,file=" + vcopy]
         if mode in ("iso-efi", "iso-bios"):
-            cmd += ["-drive", "file=%s,media=cdrom,if=none,id=cd0,readonly=on" % a.iso,
+            cmd += ["-drive", "file=%s,media=cdrom,if=none,id=cd0,readonly=on" % self.iso,
                     "-device", "ide-cd,drive=cd0,bus=ide.1,unit=0,bootindex=0"]
+        elif mode == "iso-efi-sata":
+            cmd += ["-drive", "file=%s,media=cdrom,if=none,id=cd0,readonly=on" % self.iso,
+                    "-device", "ahci,id=sata0",
+                    "-device", "ide-cd,drive=cd0,bus=sata0.0,bootindex=0"]
         elif mode == "kernel-efi":
-            if not a.kernel:
+            if not self.kernel:
                 raise SystemExit("boot-test: %s needs --kernel" % self.variant)
-            cmd += ["-kernel", a.kernel, "-append", extra]
+            cmd += ["-kernel", self.kernel, "-append", extra]
         else:
             raise SystemExit("boot-test: unknown variant %r" % self.variant)
         return cmd, qmp, ser
@@ -420,6 +437,13 @@ class Boot:
                 if t is not None:
                     marks[key] = round(t, 2)
             self.result["serial_arrival"] = marks
+            # when the kernel started, in seconds since QEMU started: each
+            # time-stamped line arrives a little after its kernel time
+            # stamp, so the smallest difference is the start
+            offs = [t - float(m.group(1)) for t, m in
+                    ((t, KLINE.match(text)) for t, text in serial.lines) if m]
+            if offs:
+                self.result["kernel_offset"] = round(min(offs), 3)
             if "kernel" not in self.result:
                 self.result["kernel"] = kernel_timeline(texts)
         return self.result
@@ -500,32 +524,48 @@ def fmt(v, unit=" s"):
 def summarize(results, accel, sizes):
     by = {}
     for r in results:
-        by.setdefault(r["variant"], []).append(r)
+        by.setdefault((r["variant"], r.get("build", "this")), []).append(r)
     rows, notes = [], []
-    for variant, runs in by.items():
+
+    def med_of(vals):
+        vals = [v for v in vals if v is not None]
+        return statistics.median(vals) if vals else None
+
+    for (variant, build), runs in by.items():
+        label = variant if build == "this" else "%s (%s)" % (variant, build)
         ok = [r["desktop"] for r in runs if r.get("desktop") is not None]
         med = statistics.median(ok) if ok else None
-        first = [r["first_serial"] for r in runs if r.get("first_serial") is not None]
-        k = runs[0].get("kernel") or {}
-        ms = k.get("milestones", {})
-        rows.append("| `%s` | %d/%d | %s | %s | %s | %s |" % (
-            variant, len(ok), len(runs), fmt(med),
+        # the phases: firmware + loading the kernel, the kernel until it
+        # starts /init (ominit's first message if the kernel was quiet),
+        # userspace until the desktop's first frame
+        k_start = med_of([r.get("kernel_offset") for r in runs])
+        user = med_of([((r.get("kernel") or {}).get("milestones", {}).get("init_start") or
+                        (r.get("kernel") or {}).get("milestones", {}).get("ominit"))
+                       for r in runs])
+        ready = med_of([(r.get("kernel") or {}).get("milestones", {}).get("desktop_ready")
+                        for r in runs])
+        rows.append("| `%s` | %d/%d | %s | %s | %s | %s | %s |" % (
+            label, len(ok), len(runs), fmt(med),
             ", ".join(fmt(x, "") for x in ok) or "–",
-            fmt(statistics.median(first)) if first else "–",
-            fmt(ms.get("init_start"))))
-        msg = "desktop on screen after %s (%s; runs: %s)" % (
-            fmt(med), accel, ", ".join(fmt(x, "") for x in ok) or "none")
+            fmt(k_start), fmt(user),
+            fmt(ready - user) if ready is not None and user is not None else "–"))
+        msg = "desktop on screen after %s (%s; runs: %s); kernel started at %s, " \
+              "/init at %s, desktop ready %s later" % (
+                  fmt(med), accel, ", ".join(fmt(x, "") for x in ok) or "none",
+                  fmt(k_start), fmt(user),
+                  fmt(ready - user) if ready is not None and user is not None else "–")
         if not ok:
             msg = "no desktop: %s" % runs[0].get("error", "?")
-        notes.append((variant, msg))
+        notes.append((label, msg))
     md = ["### Boot test (QEMU, %s)" % accel, ""]
     if sizes:
         md += [", ".join("%s: %.1f MB" % (k, v / 1e6) for k, v in sizes), ""]
-    md += ["| boot | reached desktop | median | each run (s) | first serial output | kernel ran /init at |",
-           "|---|---|---|---|---|---|"] + rows + [""]
+    md += ["| boot | reached desktop | desktop visible after (median) | each run (s) "
+           "| power-on to kernel | kernel to /init | /init to desktop ready |",
+           "|---|---|---|---|---|---|---|"] + rows + [""]
     for r in results:
         k = r.get("kernel") or {}
-        if r["run"] != 1 or not k.get("lines"):
+        if r["run"] != 1 or not k.get("lines") or r.get("build", "this") != "this":
             continue
         md.append("<details><summary><code>%s</code>: kernel timeline</summary>" % r["variant"])
         md.append("")
@@ -543,6 +583,11 @@ def summarize(results, accel, sizes):
             md.append("")
             for us, name in k["initcalls"][:15]:
                 md.append("- %.1f ms `%s`" % (us / 1000.0, name))
+        if k.get("excerpt"):
+            md.append("")
+            md.append("```")
+            md += k["excerpt"]
+            md.append("```")
         md.append("</details>")
         md.append("")
     return "\n".join(md) + "\n", notes
@@ -556,6 +601,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--iso")
     ap.add_argument("--kernel")
+    ap.add_argument("--ref-iso", help="another build's ISO, booted alternately")
+    ap.add_argument("--ref-kernel")
+    ap.add_argument("--ref-name", default="reference")
     ap.add_argument("--variant", action="append", default=[])
     ap.add_argument("--repeat", type=int, default=1)
     ap.add_argument("--timeout", type=int, default=0,
@@ -582,13 +630,22 @@ def main():
     results = []
     for rep in range(1, args.repeat + 1):
         for vi, variant in enumerate(variants):
-            boot = Boot(args, variant, rep, accel, args.out)
-            print("boot-test: %s (run %d, %s)..." % (variant, rep, accel), flush=True)
-            r = boot.run(interact=(rep == 1 and vi == 0 and not args.no_interact))
-            print("boot-test:   desktop at %s, first serial output at %s%s" % (
-                fmt(r.get("desktop")), fmt(r.get("first_serial")),
-                ("  [%s]" % r["error"]) if r.get("error") else ""), flush=True)
-            results.append(r)
+            builds = [("this", args.iso, args.kernel)]
+            # the reference build boots the same way, right after (UEFI
+            # boots of the ISO, and plain kernel-efi: its kernel may lack
+            # newer options)
+            if args.ref_iso and variant in ("iso-efi", "iso-efi-sata", "kernel-efi:"):
+                builds.append((args.ref_name, args.ref_iso, args.ref_kernel))
+            for build, iso, kernel in builds:
+                boot = Boot(args, variant, rep, accel, args.out, build, iso, kernel)
+                print("boot-test: %s [%s] (run %d, %s)..." % (variant, build, rep, accel),
+                      flush=True)
+                r = boot.run(interact=(rep == 1 and vi == 0 and build == "this"
+                                       and not args.no_interact))
+                print("boot-test:   desktop at %s, kernel started at %s%s" % (
+                    fmt(r.get("desktop")), fmt(r.get("kernel_offset")),
+                    ("  [%s]" % r["error"]) if r.get("error") else ""), flush=True)
+                results.append(r)
 
     with open(os.path.join(args.out, "result.json"), "w") as f:
         json.dump({"accel": accel, "results": results}, f, indent=1)
@@ -609,20 +666,21 @@ def main():
         # the kernel timeline of each variant's first boot, for the record
         for r in results:
             k = r.get("kernel") or {}
-            if r["run"] == 1 and k.get("lines"):
+            if r["run"] == 1 and k.get("lines") and r.get("build", "this") == "this":
                 lines = ["milestones %s" % json.dumps(k.get("milestones", {}))]
                 if r.get("shell"):
                     lines.append("serial shell: %s" % r["shell"])
-                lines += ["pause %.3f s after [%.3f] %s" % (g[0], g[1], g[2])
-                          for g in k.get("gaps", [])[:8]]
+                lines += ["pause %.3f s after [%.3f] %s -> %s" % (g[0], g[1], g[2], g[3])
+                          for g in k.get("gaps", [])[:6]]
                 lines += ["initcall %.1f ms %s" % (us / 1000.0, n)
                           for us, n in k.get("initcalls", [])[:12]]
                 if r.get("uptime_at_dump") is not None:
                     lines.append("uptime at dump %.2f" % r["uptime_at_dump"])
+                lines += k.get("excerpt", [])
                 print("::notice title=Kernel %s::%s" % (r["variant"], gh_escape("\n".join(lines))))
             if r.get("error"):
-                print("::warning title=Boot %s run %d::%s%%0A%s" % (
-                    r["variant"], r["run"], gh_escape(r["error"]),
+                print("::warning title=Boot %s [%s] run %d::%s%%0A%s" % (
+                    r["variant"], r.get("build", "this"), r["run"], gh_escape(r["error"]),
                     gh_escape("\n".join(r.get("serial_tail", [])[-12:]))))
 
     if args.print_thumbs:
@@ -637,12 +695,13 @@ def main():
                     continue
                 with open(jpg, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode()
-                print("===THUMB %s/%s %d===" % (r["variant"], s["label"], len(b64)))
+                print("===THUMB %s [%s]/%s %d===" % (r["variant"], r.get("build", "this"),
+                                                    s["label"], len(b64)))
                 for i in range(0, len(b64), 120):
                     print(b64[i:i + 120])
                 print("===END===")
 
-    first = [r for r in results if r["variant"] == variants[0]]
+    first = [r for r in results if r["variant"] == variants[0] and r.get("build", "this") == "this"]
     return 0 if first and all(r.get("desktop") is not None for r in first) else 1
 
 

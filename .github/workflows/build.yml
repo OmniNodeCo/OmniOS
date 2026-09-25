@@ -252,6 +252,17 @@ jobs:
               --pattern '*.iso' --pattern 'omnios-bzImage-*'
           ls -la build/out
 
+      - name: Get the latest release, to compare with
+        if: needs.build.result == 'success'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p build/ref
+          gh release download --repo "$GITHUB_REPOSITORY" --dir build/ref \
+              --pattern '*.iso' --pattern 'omnios-bzImage-*' || true
+          ls -la build/ref
+
       - name: Install QEMU and UEFI firmware
         run: |
           sudo apt-get update -qq
@@ -274,16 +285,23 @@ jobs:
               IFS=';' read -r -a list <<< "$VARIANTS"
               for v in "${list[@]}"; do set -- "$@" --variant "$v"; done
           else
-              # the ISO as VMware boots it; the same kernel handed over
-              # directly, with the kernel log read back (initcall times);
-              # the ISO on BIOS firmware
-              set -- "$@" --variant iso-efi \
+              # the ISO as VMware boots it, and with the CD-ROM on SATA; the
+              # same kernel handed over directly, with the kernel log read
+              # back (initcall times); the ISO on BIOS firmware
+              set -- "$@" --variant iso-efi --variant iso-efi-sata \
                           --variant "kernel-efi:omnios.serialshell initcall_debug log_buf_len=8M" \
                           --variant iso-bios
           fi
+          # the latest release boots alternately with this build, if there
+          ref=$(ls build/ref/*.iso 2>/dev/null | head -n 1 || true)
+          if [ -n "$ref" ]; then
+              name=${ref##*/OmniOS-}; name=${name%-amd64.iso}
+              set -- "$@" --ref-iso "$ref" --ref-name "$name" \
+                          --ref-kernel "$(ls build/ref/omnios-bzImage-* | head -n 1)"
+          fi
           python3 tools/boot-test.py --iso build/out/*.iso \
               --kernel build/out/omnios-bzImage-* --out build/boot-test \
-              --print-thumbs 3-desktop,4-start "$@"
+              --print-thumbs 3-desktop,4-start,timeout "$@"
 
       - name: Upload screenshots and logs
         if: ${{ !cancelled() }}
