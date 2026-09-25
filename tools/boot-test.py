@@ -16,11 +16,13 @@ slower.
 
 Each --variant is one way to boot, and every variant boots --repeat times:
     iso-efi              the ISO on UEFI firmware (the .vmx's default)
-    iso-efi-sata         the same with the CD-ROM on SATA (AHCI), not IDE
     iso-bios             the ISO on BIOS firmware (ISOLINUX)
     kernel-efi[:ARGS]    the kernel started by the firmware directly, with
                          ARGS added to its built-in command line, e.g.
                          kernel-efi:quiet or kernel-efi:loglevel=7
+with options after the mode, joined with "+": sata (the CD-ROM on SATA
+instead of IDE), vmxnet3 or e1000e (the network adapter; e1000 otherwise).
+iso-efi+sata+vmxnet3 is the machine the current .vmx describes.
 
 How "the desktop is on the screen" is told: the screen is captured every
 0.2 s, and the desktop (lock screen, wallpaper) is the first picture with
@@ -313,6 +315,8 @@ class Boot:
     def command(self):
         a = self.args
         mode, _, extra = self.variant.partition(":")
+        mode, *opts = mode.split("+")
+        nic = "vmxnet3" if "vmxnet3" in opts else "e1000e" if "e1000e" in opts else "e1000"
         qmp = os.path.join(self.tmp, "qmp.sock")
         ser = os.path.join(self.tmp, "serial.sock")
         cmd = [a.qemu,
@@ -326,20 +330,20 @@ class Boot:
                % (ser, os.path.join(self.dir, "serial.log")),
                "-serial", "chardev:ser0",
                "-netdev", "user,id=n0",
-               "-device", "e1000,netdev=n0,romfile="]
-        if mode in ("iso-efi", "iso-efi-sata", "kernel-efi"):
+               "-device", "%s,netdev=n0,romfile=" % nic]
+        if mode in ("iso-efi", "kernel-efi"):
             code, vars_ = find_ovmf()
             vcopy = os.path.join(self.tmp, "OVMF_VARS.fd")
             shutil.copy(vars_, vcopy)
             cmd += ["-drive", "if=pflash,format=raw,unit=0,readonly=on,file=" + code,
                     "-drive", "if=pflash,format=raw,unit=1,file=" + vcopy]
         if mode in ("iso-efi", "iso-bios"):
-            cmd += ["-drive", "file=%s,media=cdrom,if=none,id=cd0,readonly=on" % self.iso,
-                    "-device", "ide-cd,drive=cd0,bus=ide.1,unit=0,bootindex=0"]
-        elif mode == "iso-efi-sata":
-            cmd += ["-drive", "file=%s,media=cdrom,if=none,id=cd0,readonly=on" % self.iso,
-                    "-device", "ahci,id=sata0",
-                    "-device", "ide-cd,drive=cd0,bus=sata0.0,bootindex=0"]
+            cmd += ["-drive", "file=%s,media=cdrom,if=none,id=cd0,readonly=on" % self.iso]
+            if "sata" in opts:
+                cmd += ["-device", "ahci,id=sata0",
+                        "-device", "ide-cd,drive=cd0,bus=sata0.0,bootindex=0"]
+            else:
+                cmd += ["-device", "ide-cd,drive=cd0,bus=ide.1,unit=0,bootindex=0"]
         elif mode == "kernel-efi":
             if not self.kernel:
                 raise SystemExit("boot-test: %s needs --kernel" % self.variant)
@@ -485,6 +489,7 @@ class Boot:
             self.result["shell"] = "dmesg did not finish"
             return
         text = out.decode("utf-8", "replace").replace("\r", "")
+        self.shell_checks(serial)
         up = re.search(r"^(\d+\.\d+) \d+\.\d+$", text, re.M)
         if up:
             self.result["uptime_at_dump"] = float(up.group(1))
@@ -494,6 +499,26 @@ class Boot:
             f.write("\n".join(lines) + "\n")
         self.result["shell"] = "ok"
         self.result["kernel"] = kernel_timeline(lines)
+
+    def shell_checks(self, serial):
+        """the network (DHCP lease) and PID 1's reaping, through the shell"""
+        start = serial.size()
+        serial.send("i=0; while [ $i -lt 15 ] && ! ifconfig eth0 2>/dev/null | grep -q 'inet addr'; "
+                    "do sleep 1; i=$((i+1)); done; echo __OMNI_\"NET\"__; ifconfig eth0; route -n; "
+                    "echo zombies=$(grep -l ') Z ' /proc/[0-9]*/stat 2>/dev/null | wc -l); "
+                    "echo __OMNI_\"END2\"__\n")
+        out = serial.wait_for(r"__OMNI_END2__", start, 30.0)
+        if out is None:
+            self.result["network"] = "no answer"
+            return
+        text = out.decode("utf-8", "replace").replace("\r", "").split("__OMNI_NET__", 1)[-1]
+        ip = re.search(r"inet addr:(\S+)", text)
+        gw = re.search(r"^0\.0\.0\.0\s+(\S+)", text, re.M)
+        self.result["network"] = ("eth0 %s, gateway %s" % (ip.group(1), gw.group(1) if gw else "none")
+                                  if ip else "no address")
+        z = re.search(r"zombies=(\d+)", text)
+        if z:
+            self.result["zombies"] = int(z.group(1))
 
 
 def find_ovmf():
@@ -634,7 +659,7 @@ def main():
             # the reference build boots the same way, right after (UEFI
             # boots of the ISO, and plain kernel-efi: its kernel may lack
             # newer options)
-            if args.ref_iso and variant in ("iso-efi", "iso-efi-sata", "kernel-efi:"):
+            if args.ref_iso and (variant.startswith("iso-efi") or variant == "kernel-efi:"):
                 builds.append((args.ref_name, args.ref_iso, args.ref_kernel))
             for build, iso, kernel in builds:
                 boot = Boot(args, variant, rep, accel, args.out, build, iso, kernel)
@@ -670,6 +695,9 @@ def main():
                 lines = ["milestones %s" % json.dumps(k.get("milestones", {}))]
                 if r.get("shell"):
                     lines.append("serial shell: %s" % r["shell"])
+                if r.get("network"):
+                    lines.append("network: %s; zombie processes: %s" % (
+                        r["network"], r.get("zombies", "?")))
                 lines += ["pause %.3f s after [%.3f] %s -> %s" % (g[0], g[1], g[2], g[3])
                           for g in k.get("gaps", [])[:6]]
                 lines += ["initcall %.1f ms %s" % (us / 1000.0, n)

@@ -285,11 +285,14 @@ jobs:
               IFS=';' read -r -a list <<< "$VARIANTS"
               for v in "${list[@]}"; do set -- "$@" --variant "$v"; done
           else
-              # the ISO as VMware boots it, and with the CD-ROM on SATA; the
-              # same kernel handed over directly, with the kernel log read
-              # back (initcall times); the ISO on BIOS firmware
-              set -- "$@" --variant iso-efi --variant iso-efi-sata \
-                          --variant "kernel-efi:omnios.serialshell initcall_debug log_buf_len=8M" \
+              # the ISO on the machine the .vmx describes (SATA CD-ROM,
+              # vmxnet3) and on the one older .vmx files did (IDE, e1000);
+              # the kernel handed over directly with a shell on the serial
+              # port: the kernel log (initcall times), DHCP on both network
+              # adapters, zombies; the ISO on BIOS firmware
+              set -- "$@" --variant iso-efi+sata+vmxnet3 --variant iso-efi \
+                          --variant "kernel-efi+vmxnet3:omnios.serialshell initcall_debug log_buf_len=8M" \
+                          --variant "kernel-efi:omnios.serialshell" \
                           --variant iso-bios
           fi
           # the latest release boots alternately with this build, if there
