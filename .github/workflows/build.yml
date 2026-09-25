@@ -76,7 +76,7 @@ jobs:
       # Cache keys.
       #  * userspace: the prebuilt bc / musl sysroot / BusyBox are
       #    reused only if nothing that shapes them changed: this workflow,
-      #    build.sh, their configs, the kernel patch (UAPI headers), the
+      #    build.sh, their configs, the kernel source (UAPI headers), the
       #    exact upstream commits just fetched, the compiler, the runner
       #    image and the workspace path (musl-gcc embeds absolute paths).
       #  * ccache: one entry per run, restored from the newest earlier one;
@@ -89,9 +89,11 @@ jobs:
           us=$( {
                   cat .github/workflows/build.yml scripts/build.sh \
                       tools/config/busybox.config patches/*
-                  for p in bc musl busybox linux; do
+                  for p in bc musl busybox; do
                       echo "$p $(git -C "src/$p" rev-parse HEAD)"
                   done
+                  # the kernel source (its UAPI headers are in the sysroot)
+                  echo "linux $(git rev-parse HEAD:os/kernel/src)"
                   CCACHE_DISABLE=1 gcc -dumpfullversion
                   echo "$GITHUB_WORKSPACE"
                 } | sha256sum | cut -c1-20 )

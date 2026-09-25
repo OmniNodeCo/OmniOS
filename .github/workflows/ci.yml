@@ -25,7 +25,9 @@ jobs:
 
       - name: Compile-check the OS core (syntax only, host gcc)
         run: |
-          for f in $(find os -name '*.c' | sort); do
+          # OmniOS's own C files (os/kernel/src is the Linux source, which
+          # the kernel build checks)
+          for f in $(find os -path os/kernel/src -prune -o -name '*.c' -print | sort); do
             gcc -std=c99 -Wall -Wextra -D_GNU_SOURCE \
                 -I os/lib -I os/gui -I os/kernel -I os/apps \
                 -fsyntax-only "$f"

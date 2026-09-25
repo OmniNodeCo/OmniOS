@@ -5,7 +5,9 @@
 #   scripts/build.sh kernel     only the kernel + embedded initramfs
 #   scripts/build.sh rootfs     only the root filesystem
 #   scripts/build.sh userspace  musl + busybox + the OmniOS core
-#   scripts/build.sh fetch      only download upstream sources
+#   scripts/build.sh fetch      only download upstream sources (musl,
+#                               BusyBox, bc; the Linux kernel's source is
+#                               part of this repository: os/kernel/src)
 #   scripts/build.sh iso        assemble the bootable ISO (UEFI)
 #
 # Environment:
@@ -17,6 +19,10 @@ ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SRC="$ROOT/src"
 BLD="$ROOT/build"
 SIM="$BLD/sysroot"
+# The Linux kernel: its source is in this repository (Linux v6.12 with
+# OmniOS's edits), built out of tree so the source stays clean
+KSRC="$ROOT/os/kernel/src"
+KOUT="$BLD/linux"
 JOBS="${OMNIOS_JOBS:-$(nproc 2>/dev/null || echo 2)}"
 VERSION="$(tr -d '[:space:]' < "$ROOT/version.txt")"
 
@@ -51,20 +57,10 @@ stage_fetch() {
             git clone --depth 1 ${ref:+--branch "$ref"} "$2" "$dst"
         }
     }
-    clone linux        https://github.com/torvalds/linux.git        v6.12
     clone musl         https://github.com/ifduyue/musl.git           v1.2.6
     clone busybox      https://github.com/mirror/busybox.git         1_36_1
     clone bc           https://github.com/gavinhoward/bc.git          7.1.0
-    # apply the reproducible kernel edits
-    (
-        cd "$SRC/linux"
-        if git apply --check "$ROOT/patches/kernel-omnios.patch" 2>/dev/null; then
-            git apply "$ROOT/patches/kernel-omnios.patch"
-            log "  applied patches/kernel-omnios.patch"
-        else
-            warn "  kernel patch not applied (already applied?)"
-        fi
-    )
+    # (no kernel download: its source is os/kernel/src, in this repository)
     # BusyBox's TLS P-256 fix: without it, wget cannot talk to GitHub
     # (OmniOS Update); see the patch header
     (
@@ -91,11 +87,9 @@ stage_toolchain() {
     log "  bc ok: $SRC/bc/bin/bc"
 
     # kernel UAPI headers into sysroot for the musl userspace build
-    (
-        cd "$SRC/linux"
-        PATH="$SRC/bc/bin:$PATH" make ARCH=x86_64 headers_install \
-            INSTALL_HDR_PATH="$SIM/usr" >/dev/null
-    )
+    [ -f "$KSRC/Makefile" ] || die "kernel source missing: $KSRC"
+    PATH="$SRC/bc/bin:$PATH" make -C "$KSRC" O="$KOUT" ARCH=x86_64 \
+        headers_install INSTALL_HDR_PATH="$SIM/usr" >/dev/null
     log "  kernel headers installed to $SIM/usr/include"
 }
 
@@ -195,13 +189,16 @@ stage_kernel() {
     stage_os
     stage_rootfs
     (
-        cd "$SRC/linux"
         PATH="$SRC/bc/bin:$PATH"
+        # the kernel from os/kernel/src, built in build/linux
+        kmake() { make -C "$KSRC" O="$KOUT" ARCH=x86_64 "$@"; }
+        mkdir -p "$KOUT"
+        cd "$KOUT"
         # Native Kconfig (not kconfiglib): Linux v6.12 Kconfig uses the `modules`
         # keyword, which the last kconfiglib release cannot parse. The kernel's
         # own `conf` handles it; it needs flex+bison (installed as build deps).
-        make ARCH=x86_64 x86_64_defconfig >/dev/null
-        ./scripts/kconfig/merge_config.sh -m .config \
+        kmake x86_64_defconfig >/dev/null
+        "$KSRC/scripts/kconfig/merge_config.sh" -m .config \
             "$ROOT/tools/config/override.config" >/dev/null
         # Embed the assembled rootfs as the initramfs, uncompressed: the
         # whole kernel image is compressed (zstd, override.config) anyway,
@@ -211,13 +208,13 @@ stage_kernel() {
         # it the kernel prints "unable to open an initial console" on the
         # screen. Files owned by the building user become root's.
         printf 'nod /dev/console 0600 0 0 c 5 1\n' > "$BLD/initramfs-extra.list"
-        ./scripts/config --file .config \
+        "$KSRC/scripts/config" --file .config \
             --set-str INITRAMFS_SOURCE "$BLD/rootfs $BLD/initramfs-extra.list" \
             --set-val INITRAMFS_ROOT_UID -1 \
             --set-val INITRAMFS_ROOT_GID -1 \
             --disable INITRAMFS_COMPRESSION_GZIP \
             --enable INITRAMFS_COMPRESSION_NONE
-        make ARCH=x86_64 olddefconfig >/dev/null
+        kmake olddefconfig >/dev/null
         # OmniOS Update needs these (a warning: the OS boots without them)
         for opt in KEXEC_FILE E1000 VMXNET3; do
             grep -q "^CONFIG_$opt=y" .config || warn "  kernel: CONFIG_$opt is off"
@@ -234,11 +231,11 @@ stage_kernel() {
                grep -o '"[^"]*"' | tr -d '"\n')
         [ "$want" = "$have" ] ||
             warn "  kernel: CONFIG_CMDLINE differs from BUILTIN_CMDLINE in os/apps/update.c"
-        make -j"$JOBS" bzImage
+        kmake -j"$JOBS" bzImage
     )
     # collect the monolithic EFI-stub kernel
     mkdir -p "$BLD/out"
-    cp "$SRC/linux/arch/x86/boot/bzImage" "$BLD/out/omnios-bzImage-$VERSION"
+    cp "$KOUT/arch/x86/boot/bzImage" "$BLD/out/omnios-bzImage-$VERSION"
     log "  kernel: $BLD/out/omnios-bzImage-$VERSION"
 }
 
@@ -259,7 +256,7 @@ stage_iso() {
 }
 
 stage_clean() {
-    rm -rf "$BLD/rootfs" "$BLD/install" "$BLD/out"
+    rm -rf "$BLD/rootfs" "$BLD/install" "$BLD/out" "$KOUT"
     log "cleaned build outputs"
 }
 

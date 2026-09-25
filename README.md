@@ -13,7 +13,7 @@ source inside this repository.
 
 | Layer | From source | Notes |
 | --- | --- | --- |
-| Kernel | Linux `v6.12` (git, `torvalds/linux`) | x86_64, monolithic, bootable via EFI stub |
+| Kernel | Linux `v6.12`, source in this repository (`os/kernel/src`, from `torvalds/linux`) | x86_64, monolithic, bootable via EFI stub |
 | C library | musl `1.2.6` | static userspace, no glibc |
 | Core tools | BusyBox `1.36.1` | static, ash shell, ~75 applets |
 | GUI | OmniOS desktop (written from scratch, `os/gui`) | Windows 11-style desktop on the Linux framebuffer: compositing window manager, centred taskbar, Start menu with search, Quick Settings, desktop icons, App Store and bundled apps. |
@@ -45,6 +45,7 @@ Makefile                           `make help` — thin wrapper over scripts/bui
 scripts/build.sh                   build orchestrator, one stage per arg
 os/                                from-scratch OmniOS source (init, libs, GUI)
   kernel/                          PID 1 init (ominit) + mount/device helpers
+    src/                           the Linux v6.12 source with OmniOS's edits (see below)
   lib/                             framebuffer, rasterizer, text canvas, input
   gui/                             desktop shell, window manager, protocol, client
   apps/                            terminal, files, calc, editor, sysinfo, about, App Store, clock, snake
@@ -55,11 +56,10 @@ tools/make-iso.py                  assembles the hybrid BIOS+UEFI ISO + .vmx
 tools/make-fat.py                  pure-Python FAT image builder for the EFI System Partition
 tools/boot-test.py                 boots the ISO in QEMU/KVM, times it, screenshots (CI)
 tools/config/busybox.config        BusyBox build config
-patches/kernel-omnios.patch        the 3 kernel-tree edits, for reproducibility
 .github/workflows/build.yml        CI: builds kernel + ISO (ccache + prebuilt-userspace caches), boot test
 .github/workflows/release.yml      publishes the ISO as a GitHub release
 .github/workflows/ci.yml           static checks (py_compile, shellcheck, C syntax)
-src/                               upstream source checkouts (git-cloned; not committed)
+src/                               musl, BusyBox, bc checkouts (git-cloned; not committed)
 build/                             build artifacts (not committed)
 ```
 
@@ -163,7 +163,7 @@ python3 -m pip install --user --break-system-packages pycdlib
 scripts/build.sh full        # or: make full
 
 # individual stages:
-scripts/build.sh fetch       # git clone linux v6.12, musl, busybox, bc
+scripts/build.sh fetch       # git clone musl, busybox, bc (the kernel is in os/kernel/src)
 scripts/build.sh toolchain   # bc + kernel UAPI headers into build/sysroot
 scripts/build.sh musl        # musl libc into build/sysroot
 scripts/build.sh userspace   # musl + busybox + the OmniOS core
@@ -293,9 +293,18 @@ BusyBox 1.36.1's TLS miscomputes P-256 keys on x86_64, and GitHub rejects
 the handshake. `patches/busybox-tls-p256.patch` carries the two upstream
 fixes (made after 1.36.1); `scripts/build.sh fetch` applies it.
 
-## Kernel tree edits
+## Kernel source (`os/kernel/src`)
 
-Three minimal, justified edits (see `patches/kernel-omnios.patch`):
+The Linux kernel's source is part of this repository: `os/kernel/src` is
+Linux v6.12 as published in `torvalds/linux` (tag `v6.12`, commit
+`adc218676eef`, "Linux 6.12"), copied in unchanged, plus OmniOS's edits
+in later commits. Fixes to the kernel go straight into this tree; `git log
+os/kernel/src` lists them. `scripts/build.sh` builds it out of tree, in
+`build/linux` (`make -C os/kernel/src O=build/linux`), so building never
+writes into the source; the kernel configuration is still
+`x86_64_defconfig` + `tools/config/override.config`.
+
+The edits so far, three minimal ones:
 
 1. `arch/x86/Kconfig` — leave `HAVE_OBJTOOL` unselected: the build host has no
    libelf headers, so the in-kernel `objtool` cannot be compiled. Every
