@@ -1,0 +1,18 @@
+#! name: Notes
+#! icon: N
+#! permissions: files
+# Keeps notes in a file in your Documents folder. It lists "files" in its
+# permissions above, so OmniOS asks you once whether it may use files.
+
+let path = HOME + "/Documents/notes.txt"
+mkdir(HOME + "/Documents")
+let old = read(path)
+if old {
+    print("Your notes so far:")
+    print(old)
+}
+let note = input("Write a note (or press Enter to stop): ")
+if note {
+    append(path, note + "\n")
+    print("Saved to " + path)
+}

@@ -1,0 +1,41 @@
+#! name: Bouncing Balls
+#! icon: B
+#! color: #22c55e
+# A window with balls bouncing around. Click to add a ball, Esc to quit.
+
+let W = 520
+let H = 360
+window("Bouncing Balls", W, H)
+
+let colors = [0x2563eb, 0xef4444, 0x22c55e, 0xf59e0b, 0xa855f7, 0x06b6d4]
+let balls = []
+
+fn add_ball(x, y) {
+    push(balls, {x: x, y: y, dx: randint(-5, 5) + 0.5, dy: randint(-5, 5) + 0.5,
+                 r: randint(10, 26), c: colors[randint(0, len(colors) - 1)]})
+}
+
+for i in range(5) { add_ball(randint(40, W - 40), randint(40, H - 40)) }
+
+let running = true
+while running {
+    # move
+    for b in balls {
+        b.x += b.dx
+        b.y += b.dy
+        if b.x < b.r or b.x > W - b.r { b.dx = -b.dx }
+        if b.y < b.r or b.y > H - b.r { b.dy = -b.dy }
+    }
+    # draw
+    clear(0xf8fafc)
+    for b in balls { circle(b.x, b.y, b.r, b.c) }
+    text(14, 12, str(len(balls)) + " balls - click to add one", 0x334155, 15)
+    present()
+    # events: wait at most 16 ms (about 60 frames a second)
+    let e = event(16)
+    while e != nil {
+        if e.type == "close" or e.name == "escape" { running = false }
+        if e.type == "click" { add_ball(e.x, e.y) }
+        e = event(0)
+    }
+}

@@ -1,0 +1,19 @@
+#! name: Web title
+#! icon: W
+#! permissions: network
+# Downloads a web page and shows its title. Needs the "network" permission.
+
+let url = input("Web address (Enter for example.com): ")
+if not url { url = "https://example.com" }
+if find(url, "://") < 0 { url = "https://" + url }
+let page = fetch(url)
+if page == nil {
+    print("Couldn't download " + url)
+} else {
+    let a = find(page, "<title>")
+    let b = find(page, "</title>")
+    if a >= 0 and b > a {
+        print("Title: " + trim(slice(page, a + 7, b)))
+    }
+    print(str(len(page)) + " bytes downloaded")
+}

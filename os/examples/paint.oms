@@ -1,0 +1,46 @@
+#! name: Paint
+#! icon: P
+#! color: #ec4899
+# Draw with the mouse: click to start a line, click again to finish it.
+# Number keys pick a colour, C clears.
+
+window("Paint", 640, 440)
+let palette = [0x111827, 0xef4444, 0xf59e0b, 0x22c55e, 0x2563eb, 0xa855f7]
+let color = palette[0]
+let last = nil
+
+fn toolbar() {
+    rect(0, 0, 640, 40, 0xf1f5f9)
+    for i in range(len(palette)) {
+        circle(24 + i * 34, 20, 12, palette[i])
+        if palette[i] == color { circle(24 + i * 34, 20, 5, 0xffffff) }
+    }
+    text(230, 11, "keys 1-6: colour   C: clear   click, click: line", 0x475569, 13)
+}
+
+clear(0xffffff)
+toolbar()
+while true {
+    let e = event()
+    if e.type == "close" { break }
+    if e.type == "key" {
+        let k = num(e.char)
+        if k != nil and k >= 1 and k <= len(palette) { color = palette[k - 1] }
+        if e.char == "c" { clear(0xffffff) }
+        toolbar()
+    }
+    if e.type == "click" {
+        if e.y < 40 {
+            let i = int((e.x - 8) / 34)
+            if i >= 0 and i < len(palette) { color = palette[i] }
+            toolbar()
+        } elif last == nil {
+            last = [e.x, e.y]
+            circle(e.x, e.y, 3, color)
+        } else {
+            line(last[0], last[1], e.x, e.y, color, 4)
+            circle(e.x, e.y, 2, color)
+            last = nil
+        }
+    }
+}

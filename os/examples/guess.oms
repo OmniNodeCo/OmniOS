@@ -1,0 +1,25 @@
+#! name: Guess the Number
+#! icon: ?
+# A little game in the console: guess the number between 1 and 100.
+
+let secret = randint(1, 100)
+let tries = 0
+print("I'm thinking of a number between 1 and 100.")
+while true {
+    let answer = input("Your guess: ")
+    if answer == nil { break }
+    let n = num(answer)
+    if n == nil {
+        print("That isn't a number.")
+        continue
+    }
+    tries += 1
+    if n < secret {
+        print("Higher!")
+    } elif n > secret {
+        print("Lower!")
+    } else {
+        print("Yes! It was " + str(secret) + ". You needed " + str(tries) + " tries.")
+        break
+    }
+}
