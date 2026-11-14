@@ -23,6 +23,7 @@
 
 #include "wm.h"
 #include "theme.h"
+#include "font.h"
 
 /* ------------------------------------------------------------------ */
 /* low-level helpers                                                  */
@@ -448,6 +449,18 @@ int omni_wm_motion(struct omni_wm *wm, int x, int y)
     wm->pointer_x = x;
     wm->pointer_y = y;
 
+    /* over the focused app's content: tell it where (hover effects) */
+    w = wm->active;
+    if (!wm->drag && w && !w->minimized && w->client >= 0 && w->client < OMNI_WM_MAX_CLI &&
+        wm->clients[w->client].want_ptr &&
+        x >= w->x && x < w->x + w->w && y >= w->y + OMNI_WM_TITLE_H && y < w->y + w->h &&
+        wm->clients[w->client].fd >= 0) {
+        char line[96];
+        long num[3] = { w->id, x - w->x, y - w->y - OMNI_WM_TITLE_H };
+        proto_build(line, sizeof(line), "PTR", 3, num);
+        send_line(wm->clients[w->client].fd, line);
+    }
+
     if (!wm->button_down || !wm->drag)
         return 0;
 
@@ -789,6 +802,70 @@ static int handle_line(struct omni_wm *wm, int ci, const char *line)
         c = parse_color(m.text);
         raster_rect(s, (int)m.num[1], (int)m.num[2],
                     (int)m.num[3], (int)m.num[4], c);
+        wm->dirty = 1;
+    } else if (strcmp(m.verb, "PTRON") == 0) {
+        cl->want_ptr = 1;
+    } else if (strcmp(m.verb, "FTEXT") == 0) {
+        /* FTEXT win x y w align size face fg text: TrueType text */
+        struct raster *s = &cl->win->surface;
+        int x, y, bw, align, px, face, tw;
+        uint32_t fg;
+        if (m.n < 8) { send_line(cl->fd, "ERR FTEXT x y w align size face fg text\n"); return 0; }
+        x = (int)m.num[1]; y = (int)m.num[2]; bw = (int)m.num[3];
+        align = (int)m.num[4]; px = (int)m.num[5]; face = (int)m.num[6];
+        fg = (uint32_t)m.num[7] & 0xffffff;
+        if (px < 6) px = 6;
+        if (px > 120) px = 120;
+        if (!font_ok()) {                       /* no fonts: the 8x8 font */
+            tw = th_text_width(m.text);
+            if (bw > 0 && align == 1) x += (bw - tw) / 2;
+            if (bw > 0 && align == 2) x += bw - tw;
+            if (px >= 18) th_text2x(s, m.text, x, y + font_ascent(px) - 14, fg);
+            else th_text(s, m.text, x, y + font_ascent(px) - 8, fg);
+        } else if (bw <= 0) {
+            font_draw(s, m.text, x, y, px, face, fg);
+        } else {
+            tw = font_width(m.text, px, face);
+            if (tw < bw && align == 1) x += (bw - tw) / 2;
+            if (tw < bw && align == 2) x += bw - tw;
+            font_draw_clip(s, m.text, x, y, px, face, fg, bw);
+        }
+        wm->dirty = 1;
+    } else if (strcmp(m.verb, "BLIT") == 0) {
+        /* BLIT win x y w h path: pixels from a file in /tmp */
+        struct raster *s = &cl->win->surface;
+        int x, y, bw, bh, fd, j;
+        uint32_t *row;
+        if (m.n < 5) { send_line(cl->fd, "ERR BLIT x y w h path\n"); return 0; }
+        x = (int)m.num[1]; y = (int)m.num[2]; bw = (int)m.num[3]; bh = (int)m.num[4];
+        if (strncmp(m.text, "/tmp/", 5) != 0 || strstr(m.text, "..") ||
+            bw <= 0 || bh <= 0 || bw > 8192 || bh > 8192) {
+            send_line(cl->fd, "ERR BLIT: bad size or path (must be in /tmp)\n");
+            return 0;
+        }
+        fd = open(m.text, O_RDONLY | O_CLOEXEC);
+        row = fd >= 0 ? malloc((size_t)bw * sizeof(uint32_t)) : NULL;
+        if (!row) {
+            if (fd >= 0) close(fd);
+            send_line(cl->fd, "ERR BLIT: cannot read the pixels\n");
+            return 0;
+        }
+        for (j = 0; j < bh; j++) {
+            int yy = y + j, i0 = x < 0 ? -x : 0, i1 = bw;
+            ssize_t want = (ssize_t)bw * 4;
+            if (pread(fd, row, (size_t)want, (off_t)j * want) != want)
+                break;
+            if (yy < 0 || yy >= s->h)
+                continue;
+            if (x + i1 > s->w) i1 = s->w - x;
+            if (i1 > i0)
+                memcpy(s->bits + (size_t)yy * (size_t)s->stride + (size_t)(x + i0),
+                       row + i0, (size_t)(i1 - i0) * sizeof(uint32_t));
+        }
+        free(row);
+        close(fd);
+        if (strncmp(m.text, "/tmp/.omni-blit-", 16) == 0)
+            unlink(m.text);                     /* one file per BLIT */
         wm->dirty = 1;
     } else if (strcmp(m.verb, "TEXT") == 0) {
         struct raster *s = &cl->win->surface;

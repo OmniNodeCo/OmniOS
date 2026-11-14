@@ -48,6 +48,7 @@ struct omni_client {
     struct omni_win *win;       /* the client's window (NULL until OPEN) */
     char   rx[OMNI_PROTO_MAX_LINE];  /* partial line receive buffer      */
     int    rxlen;
+    int    want_ptr;            /* asked for PTR (pointer moved) events  */
 };
 
 struct omni_wm {

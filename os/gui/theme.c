@@ -12,6 +12,7 @@
 
 #include "theme.h"
 #include "icons.h"
+#include "font.h"
 
 uint32_t th_accent = 0x3b82f6;
 
@@ -319,10 +320,35 @@ static void glyph(struct raster *r, uint32_t ch, int x, int y, uint32_t c)
     }
 }
 
+/* The 8x8 font's sizes in TrueType (font.h), when the fonts are there:
+ * the same baselines, so layouts made for the bitmap font still line up.
+ * Small text: 12 px (Segoe UI's 9 pt), baseline 8 px below y; 2x text:
+ * 19 px, baseline at 14; big text: 10 px per scale step. */
+#define TH_SMALL_PX   12
+#define TH_SMALL_BASE 8
+#define TH_2X_PX      19
+#define TH_2X_BASE    14
+
+int th_text_width(const char *s)
+{
+    if (font_ok())
+        return font_width(s, TH_SMALL_PX, FONT_REGULAR);
+    return th_text_big_width(s, 1) / 7 * 8;
+}
+
+int th_text_bold_width(const char *s)
+{
+    if (font_ok())
+        return font_width(s, TH_SMALL_PX, FONT_BOLD);
+    return th_text_width(s) + 1;
+}
+
 int th_text(struct raster *r, const char *s, int x, int y, uint32_t rgb)
 {
     const char *p = s;
     int cx = x;
+    if (font_ok())
+        return font_draw_base(r, s, x, y + TH_SMALL_BASE, TH_SMALL_PX, FONT_REGULAR, rgb);
     while (*p) {
         glyph(r, omni_utf8_next(&p), cx, y, 0xff000000u | rgb);
         cx += 8;
@@ -332,6 +358,8 @@ int th_text(struct raster *r, const char *s, int x, int y, uint32_t rgb)
 
 int th_text_bold(struct raster *r, const char *s, int x, int y, uint32_t rgb)
 {
+    if (font_ok())
+        return font_draw_base(r, s, x, y + TH_SMALL_BASE, TH_SMALL_PX, FONT_BOLD, rgb);
     th_text(r, s, x + 1, y, rgb);
     return th_text(r, s, x, y, rgb) + 1;
 }
@@ -340,6 +368,9 @@ int th_text_clip(struct raster *r, const char *s, int x, int y, uint32_t rgb,
                  int max_w)
 {
     int n = (int)strlen(s), fit = max_w / 8, i;
+    if (font_ok())
+        return font_draw_clip(r, s, x, y + TH_SMALL_BASE - font_ascent(TH_SMALL_PX),
+                              TH_SMALL_PX, FONT_REGULAR, rgb, max_w);
     if (fit <= 0)
         return 0;
     if (n <= fit)
@@ -398,10 +429,17 @@ static unsigned char *scale2x_bits(const unsigned char *a, int w, int h)
     return b;
 }
 
+static int big_face(int scale)
+{
+    return scale >= 4 ? FONT_LIGHT : FONT_REGULAR;
+}
+
 int th_text_big_width(const char *s, int scale)
 {
     const char *p = s;
     int n = 0;
+    if (font_ok() && scale >= 2)
+        return font_width(s, 10 * scale, big_face(scale));
     while (*p) {
         omni_utf8_next(&p);
         n++;
@@ -416,6 +454,8 @@ int th_text_big(struct raster *r, const char *s, int x, int y, int scale, uint32
     unsigned char *a;
     int n = 0, w, h = 8, i, j, k, passes = 0;
 
+    if (font_ok() && scale >= 2)
+        return font_draw_base(r, s, x, y + 7 * scale, 10 * scale, big_face(scale), rgb);
     while (*p && n < 48)
         chs[n++] = omni_utf8_next(&p);
     if (n == 0 || scale < 2)
@@ -459,6 +499,8 @@ int th_text2x(struct raster *r, const char *s, int x, int y, uint32_t rgb)
 {
     const char *p = s;
     int cx = x;
+    if (font_ok())
+        return font_draw_base(r, s, x, y + TH_2X_BASE, TH_2X_PX, FONT_REGULAR, rgb);
     while (*p) {
         glyph2x(r, omni_utf8_next(&p), cx, y, 0xff000000u | rgb);
         cx += 14;
@@ -468,6 +510,8 @@ int th_text2x(struct raster *r, const char *s, int x, int y, uint32_t rgb)
 
 int th_text2x_width(const char *s)
 {
+    if (font_ok())
+        return font_width(s, TH_2X_PX, FONT_REGULAR);
     return (int)strlen(s) * 14;
 }
 
@@ -578,7 +622,7 @@ static inline uint32_t hash2(int x, int y)
 }
 
 /* colour mixes for the wallpaper styles: out = M * (r, g, b) */
-static const float g_wall_mix[TH_WALL_COUNT][9] = {
+static const float g_wall_mix[TH_WALL_RIBBONS][9] = {
     { 1.00f, 0.00f, 0.00f,  0.00f, 1.00f, 0.00f,  0.00f, 0.00f, 1.00f },  /* Bloom    */
     { 0.20f, 0.10f, 0.05f,  0.20f, 0.60f, 0.65f,  0.25f, 0.20f, 0.55f },  /* Aurora   */
     { 0.55f, 0.10f, 0.75f,  0.25f, 0.55f, 0.25f,  0.45f, 0.10f, 0.25f },  /* Sunset   */
@@ -594,7 +638,7 @@ void th_wallpaper(uint32_t *px, int w, int h)
 
 void th_wallpaper_style(uint32_t *px, int w, int h, int style)
 {
-    const float *mix = g_wall_mix[(style >= 0 && style < TH_WALL_COUNT) ? style : 0];
+    const float *mix = g_wall_mix[(style >= 0 && style < TH_WALL_RIBBONS) ? style : 0];
     float aspect = (float)w / (float)(h > 0 ? h : 1);
     float *gx = malloc(sizeof(float) * (size_t)(NGLOW * w));
     float *gy = malloc(sizeof(float) * (size_t)(NGLOW * h));
@@ -602,6 +646,10 @@ void th_wallpaper_style(uint32_t *px, int w, int h, int style)
     static float gtab[GTAB];
     int x, y, i;
 
+    if (style >= TH_WALL_RIBBONS && th_scene(px, w, h, style)) {
+        free(gx); free(gy); free(rc);
+        return;
+    }
     if (!gx || !gy || !rc) {                    /* no memory: plain gradient */
         for (y = 0; y < h; y++)
             for (x = 0; x < w; x++)

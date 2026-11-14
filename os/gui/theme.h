@@ -76,6 +76,9 @@ unsigned th_corner_cov(int px, int py, int rad);
 /* ---- text (8x8 font, transparent background) ----------------------- */
 int  th_text(struct raster *r, const char *s, int x, int y, uint32_t rgb);
 int  th_text_bold(struct raster *r, const char *s, int x, int y, uint32_t rgb);
+/* widths of th_text / th_text_bold text (TrueType when available) */
+int  th_text_width(const char *s);
+int  th_text_bold_width(const char *s);
 /* clipped to max_w pixels; returns the width drawn */
 int  th_text_clip(struct raster *r, const char *s, int x, int y, uint32_t rgb,
                   int max_w);
@@ -95,7 +98,13 @@ int  th_text_big_width(const char *s, int scale);
 void th_wallpaper(uint32_t *px, int w, int h);
 /* the same composition in another palette: TH_WALL_* (Settings picks one) */
 enum { TH_WALL_BLOOM, TH_WALL_AURORA, TH_WALL_SUNSET, TH_WALL_OCEAN,
-       TH_WALL_ROSE, TH_WALL_GRAPHITE, TH_WALL_COUNT };
+       TH_WALL_ROSE, TH_WALL_GRAPHITE,
+       /* painted scenes (scenes.c) */
+       TH_WALL_DUNES, TH_WALL_PEAKS, TH_WALL_NIGHT, TH_WALL_LAGOON,
+       TH_WALL_PRISM, TH_WALL_BOKEH, TH_WALL_COUNT };
+#define TH_WALL_RIBBONS TH_WALL_DUNES     /* the Bloom family ends here */
+/* draw scene `style` (TH_WALL_DUNES...) into w x h pixels; 0 if not a scene */
+int  th_scene(uint32_t *px, int w, int h, int style);
 void th_wallpaper_style(uint32_t *px, int w, int h, int style);
 /* app icon: rounded square with a gentle gradient and the initial */
 void th_icon(struct raster *r, int x, int y, int size, uint32_t rgb, char letter);

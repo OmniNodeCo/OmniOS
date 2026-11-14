@@ -37,11 +37,12 @@
 #include "../gui/client.h"
 #include "../gui/netinfo.h"
 #include "../gui/settings.h"
+#include "../gui/theme.h"         /* the wallpapers, for the previews */
 #include "../gui/updstat.h"
 #include "../gui/wm.h"          /* OMNI_WM_TITLE_H */
 
 #define WIN_W    800
-#define WIN_H    566
+#define WIN_H    660                /* less on small screens (main) */
 #define NAV_W    232
 #define PAD      24
 #define CARD_X   (NAV_W + PAD)
@@ -131,21 +132,17 @@ static void row_card(struct app *a, int y, int h, const char *title, const char 
 
 static void right_text(struct app *a, int y, uint32_t fg, const char *s)
 {
-    omni_client_textt(&a->c, CARD_X + card_w(a) - 18 - (int)strlen(s) * 8, y, fg, s);
+    omni_client_textt_box(&a->c, CARD_X + 18, y, card_w(a) - 36, OMNI_ALIGN_RIGHT, fg, s);
 }
 
 /* right-aligned value that must not run into `left_chars` of card text */
 static void right_fit(struct app *a, int y, uint32_t fg, const char *s, int left_chars)
 {
-    char buf[128];
-    int room = (card_w(a) - 36 - left_chars * 8 - 24) / 8, n = (int)strlen(s);
-    if (room < 4)
-        room = 4;
-    if (n > room)
-        snprintf(buf, sizeof(buf), "%.*s..", room - 2, s);
-    else
-        snprintf(buf, sizeof(buf), "%s", s);
-    right_text(a, y, fg, buf);
+    /* the card's own text is about 7 px a character */
+    int left = 18 + left_chars * 7 + 24, w = card_w(a) - 18 - left;
+    if (w < 40)
+        w = 40;
+    omni_client_textt_box(&a->c, CARD_X + card_w(a) - 18 - w, y, w, OMNI_ALIGN_RIGHT, fg, s);
 }
 
 static void toggle(struct app *a, int y, int on, int arg)      /* right-aligned */
@@ -168,14 +165,13 @@ static void button(struct app *a, int x, int y, int w, const char *label,
                    int primary, int arg)
 {
     struct omni_client_conn *c = &a->c;
-    int tx = x + (w - (int)strlen(label) * 8) / 2;
     if (primary) {
         omni_client_rfill(c, x, y, w, BTN_H, 6, accent(a));
-        omni_client_textt(c, tx, y + 11, 0xffffff, label);
+        omni_client_textt_box(c, x + 4, y + 11, w - 8, OMNI_ALIGN_CENTER, 0xffffff, label);
     } else {
         omni_client_rfill(c, x, y, w, BTN_H, 6, C_BTN_BD);
         omni_client_rfill(c, x + 1, y + 1, w - 2, BTN_H - 2, 5, C_BTN);
-        omni_client_textt(c, tx, y + 11, C_INK, label);
+        omni_client_textt_box(c, x + 4, y + 11, w - 8, OMNI_ALIGN_CENTER, C_INK, label);
     }
     add_zone(a, x, y, w, BTN_H, Z_BUTTON, arg);
 }
@@ -350,24 +346,46 @@ static void page_network(struct app *a)
                       "network cable is connected; VMware's NAT network works as is.");
 }
 
+/* the wallpaper itself, drawn small (theme.c / scenes.c) with rounded
+ * corners on the card's white, sent as pixels; kept for the next redraw */
 static void wall_thumb(struct app *a, int x, int y, int w, int h, int i)
 {
-    const struct omni_wallinfo *wi = &omni_walls[i];
-    struct omni_client_conn *c = &a->c;
+    static struct { int i, w, h; uint32_t *px; } cache[2 * TH_WALL_COUNT];
+    static int ncache;
+    uint32_t *px = NULL;
     int k;
-    omni_client_grad(c, x, y, w, h, wi->dark, wi->mid, 0);
-    for (k = 0; k < 9; k++) {                   /* a ribbon of light */
-        int px = x + 2 + k * (w - 8) / 8;
-        int py = y + h * 3 / 5 + ((k % 4 == 1) ? -3 : (k % 4 == 3 ? 3 : 0));
-        omni_client_rfill(c, px, py, (w - 8) / 8 + 3, 3, 1, wi->ribbon);
+
+    for (k = 0; k < ncache; k++)
+        if (cache[k].i == i && cache[k].w == w && cache[k].h == h)
+            px = cache[k].px;
+    if (!px && (px = malloc((size_t)w * (size_t)h * sizeof(uint32_t))) != NULL) {
+        int rad = w > 120 ? 8 : 6, cx, cy;
+        th_wallpaper_style(px, w, h, i);
+        for (cy = 0; cy < rad; cy++)                /* round the corners */
+            for (cx = 0; cx < rad; cx++) {
+                unsigned cov = th_corner_cov(cx, cy, rad);
+                int xs[2] = { cx, w - 1 - cx }, ys[2] = { cy, h - 1 - cy }, m;
+                for (m = 0; m < 4; m++) {
+                    uint32_t *p = &px[(size_t)ys[m >> 1] * (size_t)w + (size_t)xs[m & 1]];
+                    *p = th_blend(C_CARD, *p, cov);
+                }
+            }
+        if (ncache < (int)(sizeof(cache) / sizeof(cache[0]))) {
+            cache[ncache].i = i;
+            cache[ncache].w = w;
+            cache[ncache].h = h;
+            cache[ncache++].px = px;
+        }
     }
+    if (px)
+        omni_client_blit(&a->c, x, y, w, h, px, w);
 }
 
 static void page_personal(struct app *a)
 {
     struct omni_client_conn *c = &a->c;
     int y = 62, i, x0 = CARD_X + 18, cw = card_w(a);
-    int tw = (cw - 36 - 5 * 8) / 6, th = tw * 5 / 8;
+    int tw = (cw - 36 - 5 * 8) / 6, th = tw * 5 / 8, rows = (omni_walls_n + 5) / 6;
     uint32_t ac = accent(a);
     char s[64];
 
@@ -389,20 +407,20 @@ static void page_personal(struct app *a)
     omni_client_text2(c, x0 + 204, y + 88, C_INK, omni_accents[a->set.accent % omni_accents_n].name);
     y += 140;
 
-    card(a, y, 60 + th + 18);
+    card(a, y, 46 + rows * (th + 30));
     omni_client_textt(c, x0, y + 16, C_INK, "Background");
     omni_client_textt(c, x0 + 88, y + 16, C_DIM, "Choose a picture for your desktop");
     for (i = 0; i < omni_walls_n; i++) {
-        int tx = x0 + i * (tw + 8), ty = y + 38;
+        int tx = x0 + (i % 6) * (tw + 8), ty = y + 38 + (i / 6) * (th + 30);
         if (i == a->set.wallpaper)
             omni_client_rfill(c, tx - 3, ty - 3, tw + 6, th + 6, 6, ac);
         wall_thumb(a, tx, ty, tw, th, i);
         snprintf(s, sizeof(s), "%s", omni_walls[i].name);
-        omni_client_textt(c, tx + (tw - (int)strlen(s) * 8) / 2, ty + th + 8,
-                          i == a->set.wallpaper ? C_INK : C_DIM, s);
+        omni_client_textt_box(c, tx, ty + th + 8, tw, OMNI_ALIGN_CENTER,
+                              i == a->set.wallpaper ? C_INK : C_DIM, s);
         add_zone(a, tx, ty, tw, th + 18, Z_WALL, i);
     }
-    y += 60 + th + 30;
+    y += 46 + rows * (th + 30) + 12;
 
     card(a, y, 92);
     omni_client_textt(c, x0, y + 16, C_INK, "Accent color");
@@ -426,8 +444,8 @@ static void page_personal(struct app *a)
         int on = (i == 0) == (a->set.taskbar_left != 0), bx = x0 + cw - 36 - 168 + i * 84;
         omni_client_rfill(c, bx, y + 8, 84, 26, 5, on ? ac : C_BTN_BD);
         omni_client_rfill(c, bx + 1, y + 9, 82, 24, 4, on ? ac : C_BTN);
-        omni_client_textt(c, bx + (84 - (int)strlen(names[i]) * 8) / 2, y + 17,
-                          on ? 0xffffff : C_INK, names[i]);
+        omni_client_textt_box(c, bx, y + 17, 84, OMNI_ALIGN_CENTER,
+                              on ? 0xffffff : C_INK, names[i]);
         add_zone(a, bx, y + 8, 84, 26, Z_ALIGN, i);
     }
     omni_client_fill(c, x0, y + 41, cw - 36, 1, C_BORDER);
@@ -567,7 +585,7 @@ static void page_time(struct app *a)
     omni_client_rfill(c, bx + 38, y + 17, 272, BTN_H, 5, C_BTN_BD);
     omni_client_rfill(c, bx + 39, y + 18, 270, BTN_H - 2, 4, C_CARD);
     snprintf(s, sizeof(s), "%.32s", omni_zones[a->set.zone % omni_zones_n].name);
-    omni_client_textt(c, bx + 38 + (272 - (int)strlen(s) * 8) / 2, y + 28, C_INK, s);
+    omni_client_textt_box(c, bx + 42, y + 28, 264, OMNI_ALIGN_CENTER, C_INK, s);
     button(a, bx + 38 + 272 + 4, y + 17, 34, ">", 0, 0);
     a->z[a->nz - 1].kind = Z_ZNEXT;
     y += 76;

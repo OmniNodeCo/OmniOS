@@ -6,6 +6,7 @@
  */
 #include <string.h>
 
+#include "theme.h"
 #include "widgets.h"
 #include "wm.h"
 
@@ -57,7 +58,7 @@ void omni_button_draw(struct raster *r, struct omni_button *b)
 
     if (b->label) {
         struct canvas c;
-        int tw = (int)strlen(b->label) * 8;
+        int tw = th_text_width(b->label);
         canvas_init(&c, r, OMNI_COLOR_TEXT, face);
         canvas_text(&c, b->label,
                     b->x + (b->w - tw) / 2,

@@ -41,7 +41,8 @@ int  omni_client_textc(struct omni_client_conn *c, int x, int y,
  * -1 = disconnected. Event semantics mirror struct omni_input + win id.  */
 struct omni_client_event {
     int  type;             /* 1 key, 2 button, 3 closed, 4 wheel (key: 4 up,
-                              5 down, 6 left, 7 right; x, y = pointer) */
+                              5 down, 6 left, 7 right; x, y = pointer),
+                              5 pointer moved (x, y)                    */
     int  key;
     int  pressed;
     char text;
@@ -67,5 +68,20 @@ int  omni_client_grad(struct omni_client_conn *c, int x, int y, int w, int h,
 int  omni_client_icon(struct omni_client_conn *c, int x, int y, int size,
                       uint32_t rgb, char glyph);
 int  omni_client_wait(struct omni_client_conn *c, int timeout_ms);
+
+/* TrueType text (see FTEXT in protocol.h): face 0 regular, 1 bold, 2 light;
+ * align 0 left, 1 centre, 2 right within x..x+w (w <= 0: just at x) */
+enum { OMNI_ALIGN_LEFT, OMNI_ALIGN_CENTER, OMNI_ALIGN_RIGHT };
+int  omni_client_ftext(struct omni_client_conn *c, int x, int y, int w, int align,
+                       int size, int face, uint32_t fg, const char *s);
+/* omni_client_textt text (same size and baseline), aligned in x..x+w and
+ * cut with an ellipsis if it doesn't fit */
+int  omni_client_textt_box(struct omni_client_conn *c, int x, int y, int w,
+                           int align, uint32_t fg, const char *s);
+/* ask for type 5 events (the pointer moved over the window) */
+int  omni_client_want_pointer(struct omni_client_conn *c);
+/* copy w x h pixels (0xAARRGGBB, rows stride apart) into the window */
+int  omni_client_blit(struct omni_client_conn *c, int x, int y, int w, int h,
+                      const uint32_t *px, int stride);
 
 #endif /* OMNI_OS_GUI_CLIENT_H */

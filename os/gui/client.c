@@ -4,6 +4,7 @@
  * Client side of the OmniOS window protocol.
  */
 #include <errno.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -235,6 +236,63 @@ int omni_client_textt(struct omni_client_conn *c, int x, int y, uint32_t fg,
     return client_text_fg(c, "TEXTT", x, y, fg, s);
 }
 
+int omni_client_want_pointer(struct omni_client_conn *c)
+{
+    char line[64];
+    long num[1] = { c->win };
+    if (c->fd < 0 || c->win <= 0)
+        return -1;
+    proto_build(line, sizeof(line), "PTRON", 1, num);
+    return proto_send(c->fd, line);
+}
+
+int omni_client_ftext(struct omni_client_conn *c, int x, int y, int w, int align,
+                      int size, int face, uint32_t fg, const char *s)
+{
+    char line[OMNI_PROTO_MAX_LINE];
+    long num[8] = { c->win, x, y, w, align, size, face, (long)(fg & 0xffffff) };
+    if (c->fd < 0 || c->win <= 0)
+        return -1;
+    proto_build_text(line, sizeof(line), "FTEXT", 8, num, s ? s : "");
+    return proto_send(c->fd, line);
+}
+
+int omni_client_textt_box(struct omni_client_conn *c, int x, int y, int w, int align,
+                          uint32_t fg, const char *s)
+{
+    /* omni_client_textt's size and baseline (12 px, 8 below y): the line
+     * box starts 4 px higher */
+    return omni_client_ftext(c, x, y - 4, w, align, 12, 0, fg, s);
+}
+
+/* the pixels go through a file in /tmp (memory), one per BLIT: the
+ * desktop reads it when it gets to the BLIT line, maybe after more have
+ * been sent, and then deletes it */
+int omni_client_blit(struct omni_client_conn *c, int x, int y, int w, int h,
+                     const uint32_t *px, int stride)
+{
+    static unsigned seq;
+    char path[64], line[OMNI_PROTO_MAX_LINE];
+    long num[5] = { c->win, x, y, w, h };
+    int fd, j;
+    if (c->fd < 0 || c->win <= 0 || w <= 0 || h <= 0 || !px)
+        return -1;
+    snprintf(path, sizeof(path), "/tmp/.omni-blit-%d-%u", (int)getpid(), seq++);
+    fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+    if (fd < 0)
+        return -1;
+    for (j = 0; j < h; j++) {
+        size_t n = (size_t)w * sizeof(uint32_t);
+        if (pwrite(fd, px + (size_t)j * (size_t)stride, n, (off_t)j * (off_t)n) != (ssize_t)n) {
+            close(fd);
+            return -1;
+        }
+    }
+    close(fd);
+    proto_build_text(line, sizeof(line), "BLIT", 5, num, path);
+    return proto_send(c->fd, line);
+}
+
 int omni_client_wait(struct omni_client_conn *c, int timeout_ms)
 {
     struct pollfd pfd;
@@ -279,6 +337,12 @@ int omni_client_poll(struct omni_client_conn *c, struct omni_client_event *e)
         e->y = (int)m.num[2];
         e->key = (int)m.num[3];
         e->pressed = (int)m.num[4];
+        return 1;
+    }
+    if (strcmp(m.verb, "PTR") == 0 && m.n >= 3) {
+        e->type = 5;
+        e->x = (int)m.num[1];
+        e->y = (int)m.num[2];
         return 1;
     }
     if (strcmp(m.verb, "CLOSE") == 0) {

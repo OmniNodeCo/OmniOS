@@ -16,6 +16,7 @@ Layout produced:
     /usr/bin/omnios-*        the desktop shell and the apps
     /etc/init.d/network      DHCP on every wired adapter (started by ominit)
     /usr/share/udhcpc/default.script   applies a DHCP lease
+    /usr/share/fonts/omnios  the interface font (Selawik, os/vendor/fonts)
     /etc/omnios-update.conf  where OmniOS Update finds new releases
     /etc/passwd, /etc/group, /etc/shadow
     /etc/profile             interactive ash environment (Terminal)
@@ -164,6 +165,17 @@ def main():
     else:
         print("make-rootfs: WARN: ominit not built: the OS cannot start.",
               file=sys.stderr)
+
+    # ---- fonts: Selawik (OFL), the interface font (os/gui/font.c) ----------
+    fonts = os.path.join(REPO, "os", "vendor", "fonts", "selawik")
+    fdst = os.path.join(OUT, "usr", "share", "fonts", "omnios")
+    os.makedirs(fdst, exist_ok=True)
+    for f in sorted(os.listdir(fonts)) if os.path.isdir(fonts) else []:
+        if f.endswith(".ttf") or f == "OFL.txt":
+            shutil.copy(os.path.join(fonts, f), os.path.join(fdst, f))
+    if not os.path.exists(os.path.join(fdst, "Selawik-Regular.ttf")):
+        print("make-rootfs: WARN: no fonts: the desktop falls back to the "
+              "8x8 bitmap font.", file=sys.stderr)
 
     # ---- BusyBox and applet symlinks --------------------------------------
     if os.path.exists(bb):

@@ -26,6 +26,17 @@
  *     TEXTT <win> <x> <y> <fg> <text...>\n   8 px text; both transparent
  *     GRAD  <win> <x> <y> <w> <h> <from> <to> <vertical>\n   linear gradient
  *     ICON  <win> <x> <y> <size> <rgb> <glyph>\n   app icon, glyph = ASCII code
+ *     FTEXT <win> <x> <y> <w> <align> <size> <face> <fg> <text...>\n
+ *           TrueType text (os/gui/font.h): size in px, face 0 regular,
+ *           1 bold, 2 light; y = top of the line. With w > 0 it is
+ *           aligned in x..x+w (align 0 left, 1 centre, 2 right) and cut
+ *           with an ellipsis if it doesn't fit.
+ *     BLIT  <win> <x> <y> <w> <h> <path>\n   pixels: w*h 32-bit 0xAARRGGBB
+ *           values (host order, row by row) read from path, a file under
+ *           /tmp (tmpfs: memory), copied into the window; files named
+ *           /tmp/.omni-blit-* are deleted once read (omni_client_blit
+ *           writes one per call)
+ *     PTRON <win>\n                  send me PTR events (pointer moves)
  *     QUIT\n
  *
  *   server -> client:
@@ -35,6 +46,8 @@
  *     CLOSE <win>\n                           window closed (app should exit)
  *     KEY   <win> <keycode> <pressed> <ch>\n
  *     BTN   <win> <x> <y> <btn> <pressed>\n
+ *     PTR   <win> <x> <y>\n               the pointer moved over the window
+ *                                           (focused window only)
  *     BYE\n
  */
 #ifndef OMNI_OS_GUI_PROTOCOL_H

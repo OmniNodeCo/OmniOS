@@ -557,9 +557,9 @@ static int in_rect(int x, int y, int rx, int ry, int rw, int rh)
 static void text_mid(struct raster *r, const char *s, int cx, int y, uint32_t rgb,
                      int max_w)
 {
-    int w = (int)strlen(s) * 8;
+    int w = th_text_width(s);
     if (w > max_w)
-        w = max_w / 8 * 8;
+        w = max_w;
     th_text_clip(r, s, cx - w / 2, y, rgb, max_w);
 }
 
@@ -847,10 +847,10 @@ static void draw_toast(void)
 
     th_round_rect(r, bx, by, TOAST_BTN_W, TOAST_BTN_H, 6,
                   g_hover == HV_TOAST_GO ? th_shade(TH_ACCENT, 24) : TH_ACCENT, 255);
-    th_text(r, go, bx + (TOAST_BTN_W - (int)strlen(go) * 8) / 2, by + 10, 0xffffff);
+    th_text(r, go, bx + (TOAST_BTN_W - th_text_width(go)) / 2, by + 10, 0xffffff);
     th_round_rect(r, lx, by, TOAST_BTN_W, TOAST_BTN_H, 6, 0xffffff,
                   g_hover == HV_TOAST_LATER ? 46 : 20);
-    th_text(r, "Later", lx + (TOAST_BTN_W - 40) / 2, by + 10, TH_TEXT_LIGHT);
+    th_text(r, "Later", lx + (TOAST_BTN_W - th_text_width("Later")) / 2, by + 10, TH_TEXT_LIGHT);
 }
 
 /* once a second: has omnios-update written a new status? 1 = redraw */
@@ -1162,8 +1162,8 @@ static void draw_taskbar(void)
                      tmv.tm_hour < 12 ? "AM" : "PM");
         snprintf(dbuf, sizeof(dbuf), "%d/%d/%d", tmv.tm_mon + 1, tmv.tm_mday,
                  tmv.tm_year + 1900);
-        tw = (int)strlen(tbuf) * 8;
-        dw = (int)strlen(dbuf) * 8;
+        tw = th_text_width(tbuf);
+        dw = th_text_width(dbuf);
         th_text(r, tbuf, r->w - 16 - tw, y + 10, TH_TEXT_LIGHT);
         th_text(r, dbuf, r->w - 16 - dw, y + 26, TH_TEXT_DIM);
     }
@@ -1172,7 +1172,7 @@ static void draw_taskbar(void)
     if (!flyout && g_hover >= HV_TB && g_hover < HV_TB + n) {
         const struct tb_item *t = &it[g_hover - HV_TB];
         const char *s = tb_label(t);
-        int tw = (int)strlen(s) * 8, w, tx;
+        int tw = th_text_width(s), w, tx;
         if (tw > 320)
             tw = 320;
         w = tw + 20;
@@ -1347,12 +1347,18 @@ static void tile_label(struct raster *r, const char *s, int cx, int y)
     int n = (int)strlen(s), cut;
     char first[48];
 
-    if (n <= 10 || !strchr(s, ' ')) {
+    /* one line if it fits, else two, broken at the last space that fits */
+    if (th_text_width(s) <= SM_TILE_W - 8 || !strchr(s, ' ')) {
         text_mid(r, s, cx, y, TH_TEXT_LIGHT, SM_TILE_W);
         return;
     }
-    for (cut = n < 11 ? n : 11; cut > 0 && s[cut] != ' '; cut--)
-        ;
+    for (cut = n - 1; cut > 0; cut--) {
+        if (s[cut] == ' ') {
+            snprintf(first, sizeof(first), "%.*s", cut, s);
+            if (th_text_width(first) <= SM_TILE_W - 8)
+                break;
+        }
+    }
     if (cut <= 0)
         cut = (int)(strchr(s, ' ') - s);
     snprintf(first, sizeof(first), "%.*s", cut, s);
@@ -1391,7 +1397,7 @@ static void draw_menu(void)
             snprintf(s, sizeof(s), "Update ready: restart to install");
         else
             snprintf(s, sizeof(s), "%d apps", g_menu_n);
-        th_text(r, s, g.x + g.w - SM_PAD - 10 - (int)strlen(s) * 8, g.head_y,
+        th_text(r, s, g.x + g.w - SM_PAD - 10 - th_text_width(s), g.head_y,
                 upd_ready() ? UPD_BADGE : TH_TEXT_DIM);
     }
 
@@ -1441,7 +1447,7 @@ static void draw_menu(void)
             th_icon(r, g.x + SM_PAD + 2, ry + 8, 24, res->color, res->icon);
             th_text_clip(r, res->label, g.x + SM_PAD + 40, ry + 16, TH_TEXT_LIGHT,
                          g.w - 2 * SM_PAD - 40 - 160);
-            th_text(r, res->sub, g.x + g.w - SM_PAD - (int)strlen(res->sub) * 8, ry + 16,
+            th_text(r, res->sub, g.x + g.w - SM_PAD - th_text_width(res->sub), ry + 16,
                     TH_TEXT_DIM);
         }
     }
@@ -2200,7 +2206,7 @@ static void draw_banner(void)
         return;
     snprintf(msg, sizeof(msg), "No %s found - see omnios-serial.log",
              !g_input_ok_ptr ? "mouse" : "keyboard");
-    tw = (int)strlen(msg) * 8;
+    tw = th_text_width(msg);
     bw = tw + 40;
     bx = (g_screen.w - bw) / 2;
     th_shadow(&g_screen, bx, by, bw, 32, 16, 12, 4, 90);
@@ -2284,7 +2290,7 @@ static void shell_unlock(void)
 
 static void text_center(struct raster *r, const char *s, int y, uint32_t rgb)
 {
-    th_text(r, s, (r->w - (int)strlen(s) * 8) / 2, y, rgb);
+    th_text(r, s, (r->w - th_text_width(s)) / 2, y, rgb);
 }
 
 /* geometry of the sign-in controls */

@@ -55,6 +55,12 @@ const struct omni_wallinfo omni_walls[] = {
     { "Ocean",    0x061a33, 0x1d6fd0, 0x7dd3fc },
     { "Rose",     0x2a0f22, 0x8f2f73, 0xf9a8d4 },
     { "Graphite", 0x151619, 0x5a5d66, 0xe5e7eb },
+    { "Dunes",    0x52205f, 0xb2406a, 0xfcc583 },
+    { "Peaks",    0x07142c, 0x3f77a3, 0xf0dcc0 },
+    { "Night",    0x01030d, 0x0f1640, 0x8f7fd0 },
+    { "Lagoon",   0x082f5c, 0x0ea0c6, 0xa5f3fc },
+    { "Prism",    0x1e1b4b, 0x7c3aed, 0xf59e0b },
+    { "Bokeh",    0x1c0a33, 0x3a0d4f, 0xf472b6 },
 };
 const int omni_walls_n = (int)(sizeof(omni_walls) / sizeof(omni_walls[0]));
 
