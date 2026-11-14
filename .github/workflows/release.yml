@@ -85,6 +85,9 @@ jobs:
             echo "sha256=$(sha256sum "build/out/$k" | cut -d' ' -f1)"
           } > build/out/omnios-update.txt
           cat build/out/omnios-update.txt
+          # OmniOS Defender's definitions: every installed OmniOS fetches the
+          # latest release's copy once a day
+          cp tools/defender/omnios-defs.txt build/out/omnios-defs.txt
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -97,5 +100,6 @@ jobs:
             build/out/*.vmx
             build/out/omnios-bzImage-*
             build/out/omnios-update.txt
+            build/out/omnios-defs.txt
           draft: false
           prerelease: false

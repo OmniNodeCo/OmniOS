@@ -670,6 +670,44 @@ class Boot:
         self.result["update_summary"] = "update check: %s; update download (as 2026.1.0): %s" % (
             check_said, dl_said)
 
+        # OmniOS's own programs, Defender and the Browser, in the VM: an
+        # OmniScript program built and run straight as ./t.omx (the kernel
+        # hands .omx to omx: binfmt_misc), the EICAR test file scanned and
+        # dropped into Downloads (real-time protection), a page fetched
+        eicar = r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+        start = serial.size()
+        serial.send("echo __OMNI_\"APPS\"__; printf 'print(\"omx works\", 6 * 7)\\n' > /tmp/t.oms; "
+                    "omx build /tmp/t.oms; echo build-exit=$?; /tmp/t.omx; echo direct-exit=$?; "
+                    "printf '%s' '" + eicar + "' > /tmp/eicar.com; "
+                    "omnios-defender --scan /tmp/eicar.com; echo scan-exit=$?; "
+                    "printf '%s' '" + eicar + "' > /root/Downloads/rt.com; sleep 3; "
+                    "echo downloads: $(ls /root/Downloads); omnios-defender --list | head -n 4; "
+                    "omnios-browser --dump https://example.com 2>&1 | head -n 4; "
+                    "echo __OMNI_\"END5\"__\n")
+        out = serial.wait_for(r"__OMNI_END5__", start, 120.0)
+        ended = out is not None
+        if not ended:
+            with serial.lock:
+                out = bytes(serial.data[start:])
+        text = out.decode("utf-8", "replace").replace("\r", "")
+        text = text.split("__OMNI_APPS__", 1)[-1].rsplit("__OMNI_END5__", 1)[0]
+        lines = [ln.strip() for ln in text.split("\n")
+                 if ln.strip() and "__OMNI_" not in ln and not ln.startswith("omnios-serial#")]
+        if not ended:
+            lines.append("(unfinished after 120 s)")
+        self.result["apps"] = "\n".join(lines[-20:])
+        prog_ok = "omx works 42" in text and "direct-exit=0" in text
+        scan_ok = "scan-exit=1" in text and "EICAR" in text
+        rt = re.search(r"downloads:(.*)", text)
+        rt_ok = bool(rt) and "rt.com" not in rt.group(1) and "/root/Downloads/rt.com" in text
+        web = re.search(r"title: (.*)", text)
+        self.result["apps_ok"] = prog_ok and scan_ok and rt_ok
+        self.result["apps_summary"] = "programs: %s; Defender: %s, real-time %s; Browser: %s" % (
+            "built and ran ./t.omx" if prog_ok else "FAILED",
+            "caught EICAR" if scan_ok else "MISSED EICAR",
+            "quarantined the download" if rt_ok else "DIDN'T CATCH the download",
+            ("page '%s'" % web.group(1).strip()) if web else "no page (network?)")
+
 
 def find_ovmf():
     for code, vars_ in OVMF_PAIRS:
@@ -843,6 +881,10 @@ def main():
                    and r.get("build", "this") == "this" and r.get("update_summary")]
             if upd:
                 msg += "\n" + upd[0]
+            apps = [r["apps_summary"] for r in results if r["variant"] == variant
+                    and r.get("build", "this") == "this" and r.get("apps_summary")]
+            if apps:
+                msg += "\n" + apps[0]
             print("::notice title=Boot %s::%s" % (variant, gh_escape(msg)))
         for r in results:
             if r.get("update"):
@@ -868,6 +910,9 @@ def main():
                 if r.get("update_download"):
                     lines.append("update download (as 2026.1.0):")
                     lines += ["  " + ln for ln in r["update_download"].split("\n")]
+                if r.get("apps"):
+                    lines.append("programs, Defender, Browser:")
+                    lines += ["  " + ln for ln in r["apps"].split("\n")]
                 lines += ["pause %.3f s after [%.3f] %s -> %s" % (g[0], g[1], g[2], g[3])
                           for g in k.get("gaps", [])[:6]]
                 lines += ["initcall %.1f ms %s" % (us / 1000.0, n)
@@ -884,7 +929,10 @@ def main():
                 print("::warning title=OmniOS Update's check failed in %s [%s] run %d::%s" % (
                     r["variant"], r.get("build", "this"), r["run"],
                     gh_escape(r.get("update_check", ""))))
-            elif r.get("update_download") and not r.get("update_download_ok"):
+            if r.get("apps") and not r.get("apps_ok"):
+                print("::error title=Programs/Defender failed in %s [%s] run %d::%s" % (
+                    r["variant"], r.get("build", "this"), r["run"], gh_escape(r.get("apps", ""))))
+            if r.get("update_download") and not r.get("update_download_ok"):
                 print("::warning title=OmniOS Update's download failed in %s [%s] run %d::%s" % (
                     r["variant"], r.get("build", "this"), r["run"],
                     gh_escape(r.get("update_download", ""))))
@@ -915,6 +963,8 @@ def main():
     ok = first and all(r.get("desktop") is not None for r in first)
     ok = ok and all(r["update"].get("result") == "ok" for r in results if r.get("update"))
     ok = ok and not any(r.get("wget_crashed") for r in results if r.get("build", "this") == "this")
+    ok = ok and all(r.get("apps_ok") for r in results
+                    if r.get("build", "this") == "this" and r.get("apps"))
     return 0 if ok else 1
 
 

@@ -111,6 +111,7 @@ pid_t term_spawn(int *master, int cols, int rows, char *const argv[],
         signal(SIGINT, SIG_DFL);
         signal(SIGQUIT, SIG_DFL);
         setenv("TERM", "linux", 1);
+        unsetenv("OMNI_DESKTOP");      /* programs print here, not in a window */
         {   /* the kernel hands init HOME=/; use the account's own home */
             struct passwd *pw = getpwuid(getuid());
             if (pw && pw->pw_dir && *pw->pw_dir) {

@@ -17,6 +17,9 @@ Layout produced:
     /etc/init.d/network      DHCP on every wired adapter (started by ominit)
     /usr/share/udhcpc/default.script   applies a DHCP lease
     /usr/share/fonts/omnios  the interface font (Selawik, os/vendor/fonts)
+    /usr/share/omnios/examples  OmniScript examples (os/examples)
+    /usr/bin/omx             runs OmniOS programs (.omx, .oms); the kernel
+                             hands it .omx files (binfmt_misc, ominit)
     /etc/omnios-update.conf  where OmniOS Update finds new releases
     /etc/passwd, /etc/group, /etc/shadow
     /etc/profile             interactive ash environment (Terminal)
@@ -151,7 +154,8 @@ def main():
               "omnios-store", "omnios-clock", "omnios-snake",
               "omnios-settings", "omnios-taskmgr", "omnios-calendar",
               "omnios-mines", "omnios-2048", "omnios-tictactoe",
-              "omnios-update", "omnios-browser"):
+              "omnios-update", "omnios-browser", "omx", "omnios-code",
+              "omnios-defender"):
         s = os.path.join(OS_BIN, b)
         if os.path.exists(s):
             dst = os.path.join(OUT, "usr", "bin", b)
@@ -165,6 +169,23 @@ def main():
     else:
         print("make-rootfs: WARN: ominit not built: the OS cannot start.",
               file=sys.stderr)
+
+    # ---- OmniOS programs: examples (OmniOS Code copies them to Documents),
+    #      Defender's definitions, and the user's folders ---------------------
+    ex = os.path.join(REPO, "os", "examples")
+    exd = os.path.join(OUT, "usr", "share", "omnios", "examples")
+    os.makedirs(exd, exist_ok=True)
+    for f in sorted(os.listdir(ex)) if os.path.isdir(ex) else []:
+        if f.endswith(".oms"):
+            shutil.copy(os.path.join(ex, f), os.path.join(exd, f))
+    defs = os.path.join(REPO, "tools", "defender", "omnios-defs.txt")
+    dd = os.path.join(OUT, "var", "lib", "omnios", "defender")
+    os.makedirs(dd, exist_ok=True)
+    os.chmod(dd, 0o700)
+    if os.path.exists(defs):
+        shutil.copy(defs, os.path.join(dd, "defs.txt"))
+    for d in ("Desktop", "Documents", "Downloads", "Pictures"):
+        os.makedirs(os.path.join(OUT, "root", d), exist_ok=True)
 
     # ---- fonts: Selawik (OFL), the interface font (os/gui/font.c) ----------
     fonts = os.path.join(REPO, "os", "vendor", "fonts", "selawik")

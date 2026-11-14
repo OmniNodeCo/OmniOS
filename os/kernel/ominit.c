@@ -204,6 +204,7 @@ int main(int argc, char **argv)
     char *fbset_args[]   = { "/usr/bin/omnios-desktop", (char *)NULL };
     char *net_args[]     = { "/bin/sh", "/etc/init.d/network", (char *)NULL };
     char *update_args[]  = { "/usr/bin/omnios-update", "daemon", (char *)NULL };
+    char *defender_args[] = { "/usr/bin/omnios-defender", "--daemon", (char *)NULL };
     pid_t shell = -1;
     time_t shell_started = 0;
     int want_shell;
@@ -293,6 +294,9 @@ int main(int argc, char **argv)
         omni_spawn(net_args);
     if (access("/usr/bin/omnios-update", X_OK) == 0)
         omni_spawn(update_args);
+    /* OmniOS Defender's real-time protection */
+    if (access("/usr/bin/omnios-defender", X_OK) == 0)
+        omni_spawn(defender_args);
 
     want_shell = cmdline_has("omnios.serialshell");
     if (want_shell) {

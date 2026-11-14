@@ -157,4 +157,17 @@ void omni_mount_all(void)
         write_ctl("/proc/sys/kernel/hotplug", "/sbin/mdev");
         run_mdev_scan();
     }
+
+    /* OmniOS executables (.omx): the kernel runs them with /usr/bin/omx,
+     * recognised by their first 8 bytes (89 'OMX' 0d 0a 1a 0a), so
+     * ./game.omx starts like any program (binfmt_misc) */
+    if (access("/usr/bin/omx", X_OK) == 0) {
+        if (access("/proc/sys/fs/binfmt_misc/register", W_OK) != 0)
+            try_mount("binfmt_misc", "/proc/sys/fs/binfmt_misc", "binfmt_misc", 0, NULL);
+        if (access("/proc/sys/fs/binfmt_misc/omx", F_OK) != 0)
+            write_ctl("/proc/sys/fs/binfmt_misc/register",
+                      ":omx:M::\\x89OMX\\x0d\\x0a\\x1a\\x0a::/usr/bin/omx:");
+        if (access("/proc/sys/fs/binfmt_misc/omx", F_OK) != 0)
+            omni_log("OmniOS init: WARN couldn't register .omx programs with the kernel\n");
+    }
 }

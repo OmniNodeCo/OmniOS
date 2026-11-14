@@ -1,14 +1,18 @@
 /*
  * OmniOS — os/apps/files.c
  *
- * File Manager: browse the file system. Folders first, then files, with
- * sizes. Up/Down/PgUp/PgDn/Home/End select, Enter or a double click opens
- * a folder, Backspace goes to the parent folder, Esc closes.
+ * File Manager: browse the file system, starting in the home folder (or
+ * the folder given). Folders first, then files, with sizes.
+ * Up/Down/PgUp/PgDn/Home/End select, Enter or a double click opens a
+ * folder or a file - OmniOS programs (.omx) run, OmniScript and text
+ * open in OmniOS Code, web pages and pictures in the Browser -,
+ * Backspace goes to the parent folder, Esc closes.
  */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
 #include <dirent.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -172,7 +176,7 @@ static void draw(struct app_win *a)
              g_ndirs == 1 ? "" : "s", g_nfiles, g_nfiles == 1 ? "" : "s");
     omni_client_textt(&a->t.conn, APP_PAD, ch - STATUS_H + 10, APP_DIM, status);
     omni_client_textt(&a->t.conn, a->t.w - APP_PAD - 30 * 8, ch - STATUS_H + 10,
-                      APP_DIM, "Enter: open   Backspace: up");
+                      APP_DIM, "Double-click or Enter: open   Backspace: up");
 }
 
 static void go(struct app_win *a, const char *name)
@@ -205,6 +209,47 @@ static void go(struct app_win *a, const char *name)
     draw(a);
 }
 
+/* open a file with what suits it: OmniOS programs run, OmniScript and
+ * text open in OmniOS Code, web pages and pictures in the Browser */
+static int ends(const char *s, const char *suf)
+{
+    size_t a = strlen(s), b = strlen(suf);
+    return a >= b && strcasecmp(s + a - b, suf) == 0;
+}
+
+static void open_file(const char *name)
+{
+    char path[1400], url[1500];
+    const char *app = NULL, *arg = path;
+    unsigned char magic[8] = { 0 };
+    FILE *f;
+    snprintf(path, sizeof(path), "%s%s%s", g_cwd, strcmp(g_cwd, "/") ? "/" : "", name);
+    if ((f = fopen(path, "rb")) != NULL) {
+        if (fread(magic, 1, sizeof(magic), f) != sizeof(magic))
+            magic[0] = 0;
+        fclose(f);
+    }
+    if (magic[0] == 0x89 && !memcmp(magic + 1, "OMX", 3))
+        app = "/usr/bin/omx";                          /* an OmniOS program */
+    else if (ends(name, ".oms") || ends(name, ".txt") || ends(name, ".md") || ends(name, ".sh") ||
+             ends(name, ".conf") || ends(name, ".log") || ends(name, ".c") || ends(name, ".h") ||
+             ends(name, ".py") || ends(name, ".json") || ends(name, ".csv"))
+        app = "/usr/bin/omnios-code";
+    else if (ends(name, ".html") || ends(name, ".htm") || ends(name, ".png") || ends(name, ".jpg") ||
+             ends(name, ".jpeg") || ends(name, ".gif") || ends(name, ".bmp")) {
+        app = "/usr/bin/omnios-browser";
+        snprintf(url, sizeof(url), "file://%s", path);
+        arg = url;
+    }
+    if (!app || access(app, X_OK) != 0)
+        return;
+    if (fork() == 0) {
+        setsid();
+        execl(app, app, arg, (char *)NULL);
+        _exit(127);
+    }
+}
+
 static void select_row(struct app_win *a, int sel)
 {
     if (g_n == 0)
@@ -226,12 +271,20 @@ static long now_ms(void)
     return t.tv_sec * 1000L + t.tv_nsec / 1000000L;
 }
 
-int main(void)
+int main(int argc, char **argv)
 {
     struct app_win a;
     long last_click = 0;
     int last_row = -1;
+    const char *home = getenv("HOME");
+    struct stat st;
 
+    signal(SIGCHLD, SIG_IGN);                      /* opened apps reap themselves */
+    /* start in the folder asked for, else the home folder */
+    if (argc > 1 && stat(argv[1], &st) == 0 && S_ISDIR(st.st_mode))
+        snprintf(g_cwd, sizeof(g_cwd), "%s", argv[1]);
+    else if (home && *home && strcmp(home, "/") && stat(home, &st) == 0 && S_ISDIR(st.st_mode))
+        snprintf(g_cwd, sizeof(g_cwd), "%s", home);
     app_init(&a, "File Manager", 560, 420);
     if (a.t.conn.fd < 0)
         return 127;
@@ -260,6 +313,8 @@ int main(void)
                 case 28: case 96:                                   /* Enter */
                     if (g_n > 0 && g_ents[g_sel].dir)
                         go(&a, g_ents[g_sel].name);
+                    else if (g_n > 0)
+                        open_file(g_ents[g_sel].name);
                     break;
                 default: break;
                 }
@@ -280,9 +335,12 @@ int main(void)
                 if (row >= 0 && row < g_rows && g_top + row < g_n) {
                     long t = now_ms();
                     int idx = g_top + row;
-                    if (idx == last_row && t - last_click < 500 && g_ents[idx].dir) {
+                    if (idx == last_row && t - last_click < 500) {
                         last_row = -1;
-                        go(&a, g_ents[idx].name);           /* double click */
+                        if (g_ents[idx].dir)
+                            go(&a, g_ents[idx].name);       /* double click */
+                        else
+                            open_file(g_ents[idx].name);
                     } else {
                         last_row = idx;
                         last_click = t;

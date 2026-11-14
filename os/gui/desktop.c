@@ -3,7 +3,12 @@
  *
  * Entry point of the desktop shell binary (/usr/bin/omnios-desktop).
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "shell.h"
@@ -24,7 +29,14 @@ static void stdio_sanitize(void)
 
 int main(void)
 {
+    const char *home = getenv("HOME");
     stdio_sanitize();
+    /* the apps it starts: a real home folder (the kernel hands init
+     * HOME=/), and a mark that they run on the desktop (programs that
+     * print then get a console window; the Terminal clears it) */
+    if (!home || !*home || !strcmp(home, "/"))
+        setenv("HOME", "/root", 1);
+    setenv("OMNI_DESKTOP", "1", 1);
     omni_shell_run();
     return 0;
 }
