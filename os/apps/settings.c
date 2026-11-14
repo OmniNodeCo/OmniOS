@@ -751,6 +751,8 @@ static void page_update(struct app *a)
                       "Updates come from github.com/OmniNodeCo/OmniOS and are checked");
     omni_client_textt(c, CARD_X + 4, y + 30, C_DIM,
                       "against the SHA-256 checksum published with each release.");
+    omni_client_textt(c, CARD_X + 4, y + 44, C_DIM,
+                      "OmniOS Defender's definitions update from there every day too.");
 }
 
 /* ------------------------------------------------------------------ */

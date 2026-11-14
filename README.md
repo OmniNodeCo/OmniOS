@@ -16,7 +16,8 @@ source inside this repository.
 | Kernel | Linux `v6.12`, source in this repository (`os/kernel/src`, from `torvalds/linux`) | x86_64, monolithic, bootable via EFI stub |
 | C library | musl `1.2.6` | static userspace, no glibc |
 | Core tools | BusyBox `1.36.1` | static, ash shell, ~75 applets |
-| GUI | OmniOS desktop (written from scratch, `os/gui`) | Windows 11-style desktop on the Linux framebuffer: compositing window manager, centred taskbar, Start menu with search, Quick Settings, desktop icons, App Store and bundled apps. |
+| GUI | OmniOS desktop (written from scratch, `os/gui`) | Windows 11-style desktop on the Linux framebuffer: compositing window manager, centred taskbar, Start menu with search, Quick Settings, desktop icons, App Store and bundled apps; anti-aliased TrueType text (Selawik, built from its sources) and twelve painted wallpapers. |
+| Apps | written from scratch (`os/apps`) | a web browser with its own HTML engine; OmniOS programs (OmniScript, `.omx` executables) and OmniOS Code to write them; OmniOS Defender (antivirus); Settings, File Manager, Terminal and more. |
 | Build tools | `bc` (gavinhoward), `musl-gcc`, `pycdlib`, flex+bison | only what the build itself needs |
 
 Everything boots from an **embedded initramfs** built into the kernel, so a
@@ -92,7 +93,8 @@ musl, and lives in `os/`:
   helpers.
 - **`os/lib/`** — `osfb` framebuffer access, `raster` the 2-D software
   rasterizer, `canvas` the 8×8-font text layer, `input`/`devinput` keyboard
-  and mouse decoding (evdev, PS/2 and tty), `gfx` the stb_image wrapper.
+  and mouse decoding (evdev, PS/2 and tty), `gfx` the stb_image wrapper,
+  `sha256` (updates, `.omx` seals, Defender's signatures).
 - **`os/gui/`** — `wm` the window manager/display server with Z-ordering,
   drag/move/resize and close-button chrome; `protocol` a line-based window
   protocol over a UNIX socket; `client` the app-side library that connects
@@ -101,8 +103,9 @@ musl, and lives in `os/`:
   the changed 16-pixel blocks to the framebuffer, with the mouse cursor as
   a separate sprite; `theme` the drawing toolkit behind the look
   (generated wallpaper, rounded corners, shadows, frosted glass, gradients
-  and app icons); `icons` the vector pictograms for every app and Settings
-  page; `catalog` the app catalog behind the Start menu and the App Store;
+  and app icons); `font` TrueType text (stb_truetype, glyphs cached per
+  size and quarter-pixel position); `scenes` the painted wallpapers;
+  `icons` the vector pictograms for every app and Settings page; `catalog` the app catalog behind the Start menu and the App Store;
   `settings` the user's settings file (wallpaper, accent colour, clock,
   time zone, taskbar, desktop icons, updates, sign-in); `account` the
   sign-in account and its password (`/etc/shadow`); `updstat` the OmniOS
@@ -121,7 +124,11 @@ musl, and lives in `os/`:
   `omnios-taskmgr` (Task Manager), `omnios-calendar`, `omnios-mines`
   (Minesweeper), `omnios-2048` and `omnios-tictactoe`. The installed set
   lives in `/var/lib/omnios/installed-apps`. `omnios-update` is OmniOS
-  Update (below); it has no window of its own.
+  Update (below); it has no window of its own. `omnios-browser` (with its
+  HTML engine `html.c`), `omx` and `omnios-code` (OmniOS programs, with the
+  OmniScript engine `oms.c`) and `omnios-defender` are described below.
+- **`os/examples/`** — OmniScript example programs, installed in
+  `/usr/share/omnios/examples`.
 
 The GUI model mirrors a real desktop: one display server owns /dev/fb0, and
 every application is a separate process that draws into its window over the
@@ -129,8 +136,8 @@ socket, receiving keyboard/mouse focus from the server.
 
 The desktop follows Windows 11:
 
-- **Taskbar**: Start, Search and pinned apps (File Manager, Terminal, App
-  Store, Settings) centred, or on the left (Settings > Personalization);
+- **Taskbar**: Start, Search and pinned apps (File Manager, Browser,
+  Terminal, App Store, Settings) centred, or on the left (Settings > Personalization);
   other open apps join them. A dash marks open apps, a longer accent dash
   the focused one; an app's windows share one icon (click cycles through
   them), and a right-click offers a new window or **Close window**. The
@@ -151,6 +158,104 @@ The desktop follows Windows 11:
 - **Keys**: Windows opens Start; Windows + L locks, + A Quick Settings,
   + N calendar, + I Settings, + E File Manager, + D shows the desktop,
   + S search, + X quick links.
+
+### Text and wallpapers
+
+The desktop and its apps draw text with **Selawik**, Microsoft's
+open-source font with the metrics of Segoe UI (SIL Open Font License),
+compiled from its sources with fontmake (`tools/fonts/build-selawik.sh`)
+into `os/vendor/fonts/selawik` and rendered anti-aliased by `os/gui/font.c`
+(stb_truetype). Apps get it through the window protocol (`TEXT2`, `TEXTT`,
+and `FTEXT` for any size, weight and alignment); the Terminal keeps its
+monospace grid. Without the font files everything falls back to the 8×8
+bitmap font.
+
+Twelve wallpapers, all computed rather than stored as pictures (Settings >
+Personalization shows them as previews): Bloom and five colourways of it,
+and six painted scenes in `os/gui/scenes.c` — Dunes, Peaks, Night, Lagoon,
+Prism and Bokeh — each drawn in 4–35 ms at 1280×800.
+
+`tools/shot/run.sh` takes screenshots of the real desktop and apps without
+a screen (the desktop runs against a frame buffer in memory), for working
+on the look without a VM: `tools/shot/run.sh unlock menu shot:start.ppm`.
+
+## Browser
+
+`omnios-browser` is a web browser written from scratch: tabs, an address
+bar that also searches (DuckDuckGo), back/forward/reload/home, a start page,
+favorites (Ctrl+D), forms (GET and POST), images (PNG, JPEG, GIF, BMP),
+downloads to `~/Downloads` (checked by OmniOS Defender) and link previews
+on hover. Its engine (`os/apps/html.c`) is a forgiving tokenizer and a
+one-pass layout: headings, paragraphs, lists, quotes, code, tables with
+aligned columns, links and form fields, drawn with the TrueType fonts.
+
+There is no JavaScript and no CSS, so pages look like their plain
+versions: articles, search results and news read well (Wikipedia, Hacker
+News, text.npr.org, lite.cnn.com); web apps don't work. Pages come through
+BusyBox `wget`, which doesn't check TLS certificates: the address bar's
+lock means encrypted, not verified. `omnios-browser --dump URL` prints a
+page as text.
+
+## OmniOS programs (OmniScript and `.omx`)
+
+OmniOS runs its own kind of program, not ELF binaries, `.exe`, `.dmg` or
+`.rpm` files: programs are written in **OmniScript** and built into
+**OmniOS executables** (`.omx`).
+
+```
+#! name: Bouncing ball
+#! permissions: files
+let name = input("Your name? ")
+fn greet(who) { return "Hello, " + who + "!" }
+print(greet(name))
+for i in range(3) { print(i) }
+```
+
+- **The language** (`os/apps/oms.c`): numbers, text, lists `[1, 2]`, maps
+  `{name: "Ada"}` (`m.name` or `m["name"]`), functions (`fn`), `let`,
+  `if/elif/else`, `while`, `for x in list` and `for i in range(a, b, step)`,
+  `break`, `continue`, `and/or/not`, `#` comments. Built in: `print`,
+  `input`, `str`, `num`, `int`, `len`, `push`, `pop`, `insert`, `keys`,
+  `values`, `has`, `del`, `join`, `split`, `upper`, `lower`, `trim`,
+  `find`, `replace`, `slice`, `sort`, `range`, maths (`sqrt`, `sin`,
+  `floor`, `random`, `randint`, `PI`...), `time`, `clock`, `sleep`, `exit`.
+  It compiles to bytecode for its own virtual machine with a garbage
+  collector.
+- **Windows** need no permission: `window(title, w, h)`, `clear`, `rect`,
+  `box`, `rrect`, `circle`, `line`, `text` (TrueType), `textw`, `image`
+  (PNG/JPEG), `present`, and `event(ms)`, which returns a map such as
+  `{type: "click", x: 10, y: 20}` or `{type: "key", name: "left"}`.
+- **Permissions**: `read`/`write`/`append`/`exists`/`listdir`/`mkdir`/
+  `remove` need `#! permissions: files` and only reach your folders, /tmp
+  and drives; `fetch(url)` needs `network`; `run(command)` needs `system`.
+  OmniOS asks you once per program.
+- **`.omx` files** hold a magic number (`89 'OMX' 0d 0a 1a 0a`), a manifest
+  (name, icon, version, permissions), the bytecode, and a SHA-256 seal
+  over all of it. `omx` refuses a file whose seal doesn't match, checks
+  the bytecode before it runs, and asks OmniOS Defender first. `ominit`
+  registers the magic number with the kernel (binfmt_misc), so
+  `./game.omx` runs from the Terminal, and a double-click in File Manager
+  runs it.
+- **`omx`**: `omx run FILE` (`.omx` or `.oms`), `omx build SRC.oms`,
+  `omx check SRC.oms`, `omx info FILE.omx`.
+- **OmniOS Code** (`omnios-code`) is the editor for them: syntax colours,
+  line numbers, auto-indent; Run (F5) shows the output and takes input,
+  errors point at their line; Build makes the `.omx`. The examples in
+  `os/examples` are copied to `~/Documents/Examples`.
+
+## OmniOS Defender
+
+`omnios-defender` is the antivirus. It finds threats by SHA-256 and by
+byte patterns — the EICAR test file, fork bombs, disk wipers, `rm -rf /`,
+reverse shells, crypto miners — and OmniOS programs whose seal is broken,
+and moves them into quarantine (`/var/lib/omnios/defender/quarantine`,
+locked), from where the app restores or deletes them. Real-time protection
+watches Downloads, Desktop, Documents, the home folder and /tmp, and shows
+an alert when it blocks something. The definitions are built in and update
+every day from the latest release's `omnios-defs.txt`
+(`tools/defender/omnios-defs.txt`). From the Terminal:
+`omnios-defender --scan PATH`, `--quick`, `--full`, `--update`, `--list`,
+`--restore ID`, `--delete ID`.
 
 ## Build (in order)
 
