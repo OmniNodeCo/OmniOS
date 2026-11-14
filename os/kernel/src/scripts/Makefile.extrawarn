@@ -68,6 +68,11 @@ KBUILD_CFLAGS += $(KBUILD_CFLAGS-y) $(CONFIG_CC_IMPLICIT_FALLTHROUGH)
 # Prohibit date/time macros, which would make the build non-deterministic
 KBUILD_CFLAGS += -Werror=date-time
 
+# GCC 15 warns about char arrays initialized by strings that fill them with
+# no room for the NUL, which the kernel does on purpose (ACPI signatures,
+# for one); the arrays aren't annotated yet.
+KBUILD_CFLAGS += $(call cc-option, -Wno-unterminated-string-initialization)
+
 # enforce correct pointer usage
 KBUILD_CFLAGS += $(call cc-option,-Werror=incompatible-pointer-types)
 
