@@ -27,7 +27,7 @@ BIN       := omnios-desktop ominit omnios-term omnios-files omnios-calc \
              omnios-edit omnios-sysinfo omnios-about omnios-store \
              omnios-clock omnios-snake omnios-settings omnios-taskmgr \
              omnios-calendar omnios-mines omnios-2048 omnios-tictactoe \
-             omnios-update omnios-browser omx omnios-code
+             omnios-update omnios-browser omx omnios-code omnios-defender
 
 # --- object lists -----------------------------------------------------
 LIB_OBJ := lib/raster.o lib/canvas.o lib/osfb.o lib/input.o lib/devinput.o
@@ -120,6 +120,12 @@ $(OUTDIR)/omnios-code: apps/code.o gui/client.o gui/protocol.o gui/theme.o \
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
+# OmniOS Defender: antivirus (signatures, quarantine, real-time protection)
+$(OUTDIR)/omnios-defender: apps/defender.o gui/client.o gui/protocol.o gui/theme.o \
+		gui/scenes.o gui/icons.o gui/font.o lib/raster.o lib/canvas.o lib/sha256.o
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
 $(OUTDIR)/omnios-taskmgr: apps/taskmgr.o gui/client.o gui/protocol.o
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -174,6 +180,7 @@ apps/files.o: apps/app.h
 apps/html.o: apps/html.h gui/font.h lib/omni.h
 apps/oms.o: apps/oms.h
 apps/code.o: gui/client.h gui/font.h gui/theme.h gui/wm.h
+apps/defender.o: gui/client.h gui/font.h gui/theme.h gui/wm.h lib/sha256.h
 apps/omx.o: apps/oms.h gui/client.h gui/font.h gui/theme.h gui/wm.h lib/sha256.h vendor/stb/stb_image.h
 apps/browser.o: apps/html.h gui/client.h gui/font.h gui/theme.h gui/wm.h vendor/stb/stb_image.h
 apps/calc.o: apps/app.h

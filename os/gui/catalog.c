@@ -47,6 +47,8 @@ const struct omni_app_info omni_catalog[] = {
       "Slide the tiles, merge the numbers, reach 2048.",       0, 0, 0xedc22e, '2' },
     { "tictactoe", "Tic-Tac-Toe", "/usr/bin/omnios-tictactoe", "Games",
       "Three in a row, against the computer or a friend.",     0, 0, 0xec4899, 'X' },
+    { "defender", "OmniOS Defender", "/usr/bin/omnios-defender", "System",
+      "Antivirus: scans, quarantine and real-time protection.", 1, 1, 0x1d4ed8, 'V' },
     { "store",    "App Store",    "/usr/bin/omnios-store",   "System",
       "Get and remove apps.",                                  1, 1, 0x3b82f6, 'A' },
     { "about",    "About OmniOS", "/usr/bin/omnios-about",   "System",

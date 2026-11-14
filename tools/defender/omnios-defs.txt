@@ -1,0 +1,27 @@
+# OmniOS Defender definitions
+# Published with each release as omnios-defs.txt; OmniOS Defender
+# downloads the latest every day (and when you press "Check for updates")
+# and adds them to the ones built into it. Lines:
+#   text NAME PATTERN     bytes to find (\xNN for any byte)
+#   hex NAME HEXBYTES     the same, written in hex
+#   sha256 NAME HEX       a file with exactly this SHA-256
+version=2026.11.14
+text EICAR-Test-File X5O!P%@AP[4\x5cPZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*
+text Linux.ForkBomb :(){ :|:& };:
+text Linux.ForkBomb :(){:|:&};:
+text Script.Destructive.RmRoot rm -rf --no-preserve-root /
+text Script.Destructive.RmRoot rm -rf /*
+text Script.Destructive.DiskWipe of=/dev/sda
+text Script.Destructive.DiskWipe of=/dev/vda
+text Script.Destructive.DiskWipe of=/dev/nvme0n1
+text Script.Destructive.Shred shred -n 3 -z /dev/
+text Shell.Reverse.Bash bash -i >& /dev/tcp/
+text Shell.Reverse.Bash sh -i >& /dev/tcp/
+text Shell.Reverse.Netcat nc -e /bin/sh
+text Shell.Reverse.Netcat nc -e /bin/bash
+text Shell.Reverse.Python socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect((
+text Miner.Stratum stratum+tcp://
+text Miner.Stratum stratum+ssl://
+text Miner.XMRig xmrig --donate-level
+text Script.Persistence.Cron * * * * * curl 
+text Script.Persistence.Cron * * * * * wget 
