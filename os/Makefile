@@ -27,7 +27,7 @@ BIN       := omnios-desktop ominit omnios-term omnios-files omnios-calc \
              omnios-edit omnios-sysinfo omnios-about omnios-store \
              omnios-clock omnios-snake omnios-settings omnios-taskmgr \
              omnios-calendar omnios-mines omnios-2048 omnios-tictactoe \
-             omnios-update omnios-browser
+             omnios-update omnios-browser omx omnios-code
 
 # --- object lists -----------------------------------------------------
 LIB_OBJ := lib/raster.o lib/canvas.o lib/osfb.o lib/input.o lib/devinput.o
@@ -98,13 +98,25 @@ $(OUTDIR)/omnios-settings: apps/settings.o gui/settings.o gui/account.o \
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 # OmniOS Update: no window of its own (Settings and the desktop show it)
-$(OUTDIR)/omnios-update: apps/update.o gui/updstat.o gui/settings.o gui/catalog.o
+$(OUTDIR)/omnios-update: apps/update.o gui/updstat.o gui/settings.o gui/catalog.o lib/sha256.o
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
 # Browser: its own HTML engine (html.c), fonts and images
 $(OUTDIR)/omnios-browser: apps/browser.o apps/html.o gui/client.o gui/protocol.o \
 		gui/theme.o gui/scenes.o gui/icons.o gui/font.o lib/raster.o lib/canvas.o
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+# omx: runs OmniOS programs (OmniScript, .oms / .omx)
+$(OUTDIR)/omx: apps/omx.o apps/oms.o gui/client.o gui/protocol.o gui/theme.o \
+		gui/scenes.o gui/icons.o gui/font.o lib/raster.o lib/canvas.o lib/sha256.o
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
+# OmniOS Code: write, run and build OmniOS programs
+$(OUTDIR)/omnios-code: apps/code.o gui/client.o gui/protocol.o gui/theme.o \
+		gui/scenes.o gui/icons.o gui/font.o lib/raster.o lib/canvas.o
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
 
@@ -147,7 +159,8 @@ gui/account.o: gui/account.h
 gui/updstat.o: gui/updstat.h
 gui/netinfo.o: gui/netinfo.h
 apps/settings.o: gui/settings.h gui/account.h gui/updstat.h gui/netinfo.h gui/catalog.h gui/client.h gui/wm.h gui/theme.h
-apps/update.o: gui/updstat.h gui/settings.h gui/catalog.h
+apps/update.o: gui/updstat.h gui/settings.h gui/catalog.h lib/sha256.h
+lib/sha256.o: lib/sha256.h
 gui/wm.o: gui/wm.h gui/protocol.h gui/theme.h
 gui/protocol.o: gui/protocol.h
 gui/client.o: gui/client.h gui/protocol.h
@@ -159,6 +172,9 @@ apps/clock.o apps/snake.o apps/taskmgr.o apps/calendar.o apps/mines.o \
 apps/game2048.o apps/tictactoe.o: gui/client.h gui/wm.h
 apps/files.o: apps/app.h
 apps/html.o: apps/html.h gui/font.h lib/omni.h
+apps/oms.o: apps/oms.h
+apps/code.o: gui/client.h gui/font.h gui/theme.h gui/wm.h
+apps/omx.o: apps/oms.h gui/client.h gui/font.h gui/theme.h gui/wm.h lib/sha256.h vendor/stb/stb_image.h
 apps/browser.o: apps/html.h gui/client.h gui/font.h gui/theme.h gui/wm.h vendor/stb/stb_image.h
 apps/calc.o: apps/app.h
 apps/edit.o: gui/client.h gui/wm.h
