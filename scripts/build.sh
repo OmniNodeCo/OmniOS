@@ -238,7 +238,17 @@ stage_kernel() {
                grep -o '"[^"]*"' | tr -d '"\n')
         [ "$want" = "$have" ] ||
             warn "  kernel: CONFIG_CMDLINE differs from BUILTIN_CMDLINE in os/apps/update.c"
-        kmake -j"$JOBS" bzImage
+        # the log is kept; when the build fails its first errors are shown
+        # again at the end (and as annotations in GitHub Actions)
+        if ! kmake -j"$JOBS" bzImage 2>&1 | tee "$BLD/kernel-build.log"; then
+            echo "---- kernel build failed; its errors:"
+            grep -E ': (fatal )?error: |\] Error [0-9]' "$BLD/kernel-build.log" | head -n 12 |
+                while IFS= read -r line; do
+                    echo "$line"
+                    if [ "${GITHUB_ACTIONS:-}" = true ]; then echo "::error title=Kernel build::$line"; fi
+                done
+            exit 1
+        fi
     )
     # collect the monolithic EFI-stub kernel
     mkdir -p "$BLD/out"
