@@ -674,13 +674,19 @@ class Boot:
         # OmniScript program built and run straight as ./t.omx (the kernel
         # hands .omx to omx: binfmt_misc), the EICAR test file scanned and
         # dropped into Downloads (real-time protection), a page fetched
-        eicar = r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+        # the EICAR string is put together from two halves: whole on the
+        # command line, it would land in the shell's history file, which
+        # real-time protection then (rightly) quarantines. The file for the
+        # manual scan goes in a folder real-time protection doesn't watch.
+        e1 = r"X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-"
+        e2 = r"ANTIVIRUS-TEST-FILE!$H+H*"
         start = serial.size()
         serial.send("echo __OMNI_\"APPS\"__; printf 'print(\"omx works\", 6 * 7)\\n' > /tmp/t.oms; "
                     "omx build /tmp/t.oms; echo build-exit=$?; /tmp/t.omx; echo direct-exit=$?; "
-                    "printf '%s' '" + eicar + "' > /tmp/eicar.com; "
-                    "omnios-defender --scan /tmp/eicar.com; echo scan-exit=$?; "
-                    "printf '%s' '" + eicar + "' > /root/Downloads/rt.com; sleep 3; "
+                    "e1='" + e1 + "'; e2='" + e2 + "'; mkdir -p /tmp/dtest; "
+                    "printf '%s%s' \"$e1\" \"$e2\" > /tmp/dtest/eicar.com; "
+                    "omnios-defender --scan /tmp/dtest/eicar.com; echo scan-exit=$?; "
+                    "printf '%s%s' \"$e1\" \"$e2\" > /root/Downloads/rt.com; sleep 3; "
                     "echo downloads: $(ls /root/Downloads); omnios-defender --list | head -n 4; "
                     "omnios-browser --dump https://example.com 2>&1 | head -n 4; "
                     "echo __OMNI_\"END5\"__\n")
