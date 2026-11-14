@@ -635,6 +635,7 @@ static struct {
     struct pop_item it[POP_MAX];
     const struct omni_app_info *app;    /* ACT_LAUNCH, ACT_CLOSE_ALL     */
     const char *path;                   /* ACT_OPEN                      */
+    const char *arg;                    /* ... and what it opens (or NULL) */
     int win_id;                         /* ACT_CLOSE                     */
 } g_pop;
 
@@ -1967,11 +1968,14 @@ static const struct {
     const char *label, *path;
     char icon;
     uint32_t color;
+    const char *arg;                    /* what the app opens (NULL: its own) */
 } g_desk[] = {
-    { "This PC",   "/usr/bin/omnios-files",    'm', 0x38bdf8 },
-    { "Terminal",  "/usr/bin/omnios-term",     '>', 0x10b981 },
-    { "App Store", "/usr/bin/omnios-store",    'A', 0xf59e0b },
-    { "Settings",  "/usr/bin/omnios-settings", 'G', 0x64748b },
+    { "This PC",     "/usr/bin/omnios-files",    'm', 0x38bdf8, "/" },
+    { "Browser",     "/usr/bin/omnios-browser",  'W', 0x0ea5e9, NULL },
+    { "OmniOS Code", "/usr/bin/omnios-code",     'K', 0x1e293b, NULL },
+    { "Terminal",    "/usr/bin/omnios-term",     '>', 0x10b981, NULL },
+    { "App Store",   "/usr/bin/omnios-store",    'A', 0xf59e0b, NULL },
+    { "Settings",    "/usr/bin/omnios-settings", 'G', 0x64748b, NULL },
 };
 
 static int desk_n(void)
@@ -2035,6 +2039,7 @@ static int desk_click(int x, int y, int btn)
         pop_begin(POP_DESKTOP);
         if (i >= 0) {
             g_pop.path = g_desk[i].path;
+            g_pop.arg = g_desk[i].arg;
             pop_add("Open", g_desk[i].icon, ACT_OPEN, 0);
         } else {
             pop_add("Personalize", 'p', ACT_PERSONALIZE, 0);
@@ -2053,7 +2058,7 @@ static int desk_click(int x, int y, int btn)
         return 0;                               /* the wm unfocuses windows */
     }
     if (i == g_desk_last && t - g_desk_last_ms <= DCLICK_MS) {
-        run_app(g_desk[i].path, NULL);          /* double-click: open */
+        run_app(g_desk[i].path, g_desk[i].arg);  /* double-click: open */
         g_desk_last = -1;
     } else {
         g_desk_last = i;
@@ -2076,7 +2081,7 @@ static int desk_key(int code, int pressed)
     case OMNI_KEY_ENTER:
     case OMNI_KEY_KPENTER:
         if (pressed == 1)
-            run_app(g_desk[g_desk_sel].path, NULL);
+            run_app(g_desk[g_desk_sel].path, g_desk[g_desk_sel].arg);
         return 1;
     case OMNI_KEY_UP:
         g_desk_sel = g_desk_sel > 0 ? g_desk_sel - 1 : 0;
@@ -2146,7 +2151,7 @@ static void pop_do(int i)
         break;
     case ACT_OPEN:
         if (g_pop.path)
-            run_app(g_pop.path, NULL);
+            run_app(g_pop.path, g_pop.arg);
         break;
     case ACT_CLOSE: {
         struct omni_win *w = omni_wm_find(&g_wm, g_pop.win_id);

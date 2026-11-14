@@ -450,7 +450,7 @@ static void page_personal(struct app *a)
     }
     omni_client_fill(c, x0, y + 41, cw - 36, 1, C_BORDER);
     omni_client_textt(c, x0, y + 55, C_INK, "Desktop icons");
-    omni_client_textt(c, x0 + 120, y + 55, C_DIM, "This PC, Terminal, App Store");
+    omni_client_textt(c, x0 + 120, y + 55, C_DIM, "This PC, Browser, OmniOS Code, Terminal...");
     toggle(a, y + 48, a->set.desktop_icons, T_DESKICONS);
 }
 
