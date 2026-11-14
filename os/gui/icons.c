@@ -516,6 +516,37 @@ static void ic_lock(struct ic *c)                       /* 'k' sign-in / lock */
     rrect(c, 22.8f, 30, 2.4f, 7, 1.2f, P(0xff78350f));
 }
 
+static void ic_browser(struct ic *c)                    /* 'W' Browser */
+{
+    struct paint wl = P(0xffffffff);
+    circle(c, 24, 24, 21, D(0xff2dd4bf, 0xff2563eb));
+    ring(c, 24, 27, 8, 13.5f, 330, 200, wl);           /* the swoosh */
+    circle(c, 24, 27, 8, D(0xff2dd4bf, 0xff2563eb));
+    rrect(c, 10.5f, 25, 13.5f, 4.5f, 2.2f, wl);
+    circle(c, 33, 15, 3, P(0xb0ffffff));
+}
+
+static void ic_defender(struct ic *c)                   /* 'V' OmniOS Defender */
+{
+    static const float sh[] = { 24, 4, 40, 10, 40, 22, 38, 30, 33, 37, 24, 44,
+                                15, 37, 10, 30, 8, 22, 8, 10 };
+    struct paint wl = P(0xffffffff);
+    poly(c, sh, 10, V(0xff60a5fa, 0xff1d4ed8, 4, 44));
+    line(c, 15.5f, 24, 21.5f, 30.5f, 3.6f, wl);       /* a check mark */
+    line(c, 21.5f, 30.5f, 33, 17.5f, 3.6f, wl);
+}
+
+static void ic_code(struct ic *c)                       /* 'K' OmniOS Code */
+{
+    struct paint br = P(0xff7dd3fc), sl = P(0xfff9a8d4);
+    rrect(c, 4, 6, 40, 36, 7, V(0xff334155, 0xff0f172a, 6, 42));
+    line(c, 19, 17, 12, 24, 3, br);                    /* < */
+    line(c, 12, 24, 19, 31, 3, br);
+    line(c, 29, 17, 36, 24, 3, br);                    /* > */
+    line(c, 36, 24, 29, 31, 3, br);
+    line(c, 26.5f, 14, 21.5f, 34, 2.6f, sl);           /* / */
+}
+
 /* ---- desktop chrome: globe + monochrome glyphs ------------------------ */
 
 static void ic_globe(struct ic *c)                      /* 'w' Network & internet */
@@ -621,6 +652,7 @@ static const struct icon_def g_icons[] = {
     { 's', ic_search },   { 'e', ic_ethernet }, { 'g', ic_gear_mono },
     { 'r', ic_refresh },  { 'c', ic_clock_mono }, { 'l', ic_lock_mono },
     { 'b', ic_taskbar_mono },
+    { 'W', ic_browser },  { 'V', ic_defender }, { 'K', ic_code },
 };
 #define N_ICONS ((int)(sizeof(g_icons) / sizeof(g_icons[0])))
 

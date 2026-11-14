@@ -27,7 +27,7 @@ BIN       := omnios-desktop ominit omnios-term omnios-files omnios-calc \
              omnios-edit omnios-sysinfo omnios-about omnios-store \
              omnios-clock omnios-snake omnios-settings omnios-taskmgr \
              omnios-calendar omnios-mines omnios-2048 omnios-tictactoe \
-             omnios-update
+             omnios-update omnios-browser
 
 # --- object lists -----------------------------------------------------
 LIB_OBJ := lib/raster.o lib/canvas.o lib/osfb.o lib/input.o lib/devinput.o
@@ -102,6 +102,12 @@ $(OUTDIR)/omnios-update: apps/update.o gui/updstat.o gui/settings.o gui/catalog.
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
 
+# Browser: its own HTML engine (html.c), fonts and images
+$(OUTDIR)/omnios-browser: apps/browser.o apps/html.o gui/client.o gui/protocol.o \
+		gui/theme.o gui/scenes.o gui/icons.o gui/font.o lib/raster.o lib/canvas.o
+	@mkdir -p $(OUTDIR)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+
 $(OUTDIR)/omnios-taskmgr: apps/taskmgr.o gui/client.o gui/protocol.o
 	@mkdir -p $(OUTDIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDFLAGS)
@@ -152,6 +158,8 @@ apps/store.o: gui/catalog.h gui/client.h gui/wm.h
 apps/clock.o apps/snake.o apps/taskmgr.o apps/calendar.o apps/mines.o \
 apps/game2048.o apps/tictactoe.o: gui/client.h gui/wm.h
 apps/files.o: apps/app.h
+apps/html.o: apps/html.h gui/font.h lib/omni.h
+apps/browser.o: apps/html.h gui/client.h gui/font.h gui/theme.h gui/wm.h vendor/stb/stb_image.h
 apps/calc.o: apps/app.h
 apps/edit.o: gui/client.h gui/wm.h
 apps/sysinfo.o: apps/app.h

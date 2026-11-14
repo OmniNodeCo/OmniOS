@@ -78,6 +78,8 @@ int  omni_client_ftext(struct omni_client_conn *c, int x, int y, int w, int alig
  * cut with an ellipsis if it doesn't fit */
 int  omni_client_textt_box(struct omni_client_conn *c, int x, int y, int w,
                            int align, uint32_t fg, const char *s);
+/* change the window's title (taskbar, title bar) */
+int  omni_client_title(struct omni_client_conn *c, const char *title);
 /* ask for type 5 events (the pointer moved over the window) */
 int  omni_client_want_pointer(struct omni_client_conn *c);
 /* copy w x h pixels (0xAARRGGBB, rows stride apart) into the window */

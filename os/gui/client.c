@@ -236,6 +236,16 @@ int omni_client_textt(struct omni_client_conn *c, int x, int y, uint32_t fg,
     return client_text_fg(c, "TEXTT", x, y, fg, s);
 }
 
+int omni_client_title(struct omni_client_conn *c, const char *title)
+{
+    char line[OMNI_PROTO_MAX_LINE];
+    long num[1] = { c->win };
+    if (c->fd < 0 || c->win <= 0)
+        return -1;
+    proto_build_text(line, sizeof(line), "TITLE", 1, num, title ? title : "");
+    return proto_send(c->fd, line);
+}
+
 int omni_client_want_pointer(struct omni_client_conn *c)
 {
     char line[64];

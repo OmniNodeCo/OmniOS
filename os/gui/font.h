@@ -20,6 +20,8 @@
 #include "../lib/omni.h"
 
 enum { FONT_REGULAR, FONT_BOLD, FONT_LIGHT, FONT_NFACES };
+/* or'ed into a face: slanted (Selawik has no italic; the glyphs are sheared) */
+#define FONT_ITALIC 0x10
 
 /* load the fonts (once); returns 1 if TrueType text is available */
 int  font_init(void);
@@ -31,6 +33,9 @@ int  font_draw(struct raster *r, const char *s, int x, int y, int px, int face,
 /* the same, with the baseline at y */
 int  font_draw_base(struct raster *r, const char *s, int x, int base, int px,
                     int face, uint32_t rgb);
+/* the first n bytes of s, baseline at base */
+int  font_draw_n(struct raster *r, const char *s, int n, int x, int base, int px,
+                 int face, uint32_t rgb);
 /* at most max_w wide: what doesn't fit is cut and ends in an ellipsis */
 int  font_draw_clip(struct raster *r, const char *s, int x, int y, int px,
                     int face, uint32_t rgb, int max_w);

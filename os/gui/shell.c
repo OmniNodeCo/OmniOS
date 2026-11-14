@@ -59,7 +59,7 @@
 #define TB_TRAY_W     112       /* clock (opens the calendar)             */
 #define TB_NET_W      40        /* network (opens Quick Settings)         */
 #define TB_UPD_W      36        /* OmniOS Update, while there is news     */
-#define TB_PINS       4
+#define TB_PINS       5
 #define TB_MAX        (2 + TB_PINS + OMNI_WM_MAX_WIN)
 #define FLY_RAD       10        /* flyout corner radius                   */
 #define FLY_GAP       12        /* flyouts float this far above the bar   */
@@ -179,7 +179,8 @@ static long long g_desk_last_ms;
 static unsigned g_showdesk;         /* Windows + D minimized these windows */
 
 /* taskbar pins, left to right (all system apps: always installed) */
-static const char *const g_pin_ids[TB_PINS] = { "files", "terminal", "store", "settings" };
+static const char *const g_pin_ids[TB_PINS] = { "files", "browser", "terminal", "store",
+                                                 "settings" };
 static unsigned char g_pin_ok[TB_PINS];      /* in this image           */
 
 /* Start menu: the installed apps from the catalog (catalog.c), rebuilt

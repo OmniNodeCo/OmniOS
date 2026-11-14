@@ -207,11 +207,26 @@ static inline uint32_t blend(uint32_t dst, uint32_t src, unsigned a)
     return 0xff000000u | (rb & 0xff00ff) | (g & 0x00ff00);
 }
 
-static void blit(struct raster *r, const struct glyph *g, int x, int y, uint32_t rgb)
+static void blit(struct raster *r, const struct glyph *g, int x, int y, uint32_t rgb,
+                 int italic)
 {
     int i, j, i0 = 0, j0 = 0, i1 = g->w, j1 = g->h;
     if (!g->bmp || !r || !r->bits)
         return;
+    if (italic) {                   /* shear: each row shifted by its height */
+        for (j = 0; j < g->h; j++) {
+            int yy = y + g->yoff + j, xx = x + g->xoff + (int)lroundf(-(g->yoff + j) * 0.2f);
+            const unsigned char *src = g->bmp + (size_t)j * (size_t)g->w;
+            if (yy < 0 || yy >= r->h)
+                continue;
+            for (i = 0; i < g->w; i++)
+                if (src[i] && xx + i >= 0 && xx + i < r->w) {
+                    uint32_t *d = r->bits + (size_t)yy * (size_t)r->stride + (size_t)(xx + i);
+                    *d = blend(*d, rgb, g_gamma[src[i]]);
+                }
+        }
+        return;
+    }
     x += g->xoff;
     y += g->yoff;
     if (x < 0) i0 = -x;
@@ -236,6 +251,8 @@ static int run(struct raster *r, const char *s, int n, int x, int base, int px,
     const char *p = s, *end = n >= 0 ? s + n : NULL;
     long pen = 0;                   /* 1/64 px */
     uint32_t prev = 0;
+    int italic = (face & FONT_ITALIC) != 0;
+    face &= ~FONT_ITALIC;
     px = clamp_px(px);
     if (face < 0 || face >= FONT_NFACES || !g_face[face].ok)
         face = FONT_REGULAR;
@@ -254,7 +271,7 @@ static int run(struct raster *r, const char *s, int n, int x, int base, int px,
         if (max_w >= 0 && (pen + g->adv + 32) / 64 > max_w)
             break;
         if (r)
-            blit(r, g, x + (int)(at >> 6), base, rgb);
+            blit(r, g, x + (int)(at >> 6), base, rgb, italic);
         pen += g->adv;
         prev = cp;
         p = q;
@@ -282,6 +299,14 @@ int font_draw_base(struct raster *r, const char *s, int x, int base, int px,
     if (!font_init() || !s)
         return 0;
     return run(r, s, -1, x, base, px, face, rgb & 0xffffff, -1, NULL);
+}
+
+int font_draw_n(struct raster *r, const char *s, int n, int x, int base, int px,
+                int face, uint32_t rgb)
+{
+    if (!font_init() || !s)
+        return 0;
+    return run(r, s, n, x, base, px, face, rgb & 0xffffff, -1, NULL);
 }
 
 int font_draw(struct raster *r, const char *s, int x, int y, int px, int face,
